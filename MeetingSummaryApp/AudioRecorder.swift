@@ -299,13 +299,37 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private struct SummaryResponse: Decodable {
         let summaryUrl: String
+        
+        init(from decoder: Decoder) throws {
+            // 1) 먼저 단일 값 컨테이너를 시도
+            let single = try decoder.singleValueContainer()
+            
+            // 케이스 A: {"summaryUrl": "..."} 형태
+            if let dict = try? single.decode([String: String].self),
+               let value = dict["summaryUrl"] {
+                self.summaryUrl = value
+                return
+            }
+            
+            // 케이스 B: "https://..." 같은 단일 문자열 형태
+            if let str = try? single.decode(String.self) {
+                self.summaryUrl = str
+                return
+            }
+            
+            // 둘 다 아니면 JSON 포맷이 예상과 다름
+            throw DecodingError.dataCorruptedError(
+                in: single,
+                debugDescription: "Expected either {\"summaryUrl\": \"...\"} or a plain string URL."
+            )
+        }
     }
 
     private func uploadAudio(fileURL: URL) {
         isUploading = true
         errorMessage = nil
         
-        guard let url = URL(string: "http://localhost:5678/webhook/711f44b4-906a-488a-82d3-7aa3ef387c86") else {
+        guard let url = URL(string: "https://www.linkly.kr/n8n/webhook/098e8967-d9fc-4cbc-affa-92efff9fcff9") else {
             self.errorMessage = "잘못된 API URL"
             self.isUploading = false
             return
@@ -328,29 +352,34 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
         // 2) multipart/form-data 바운더리 생성
         let boundary = "Boundary-\(UUID().uuidString)"
+
+        // 🔹 2-1) 타임아웃 10분 설정된 URLSessionConfiguration
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 600      // 개별 요청 타임아웃 (10분)
+        config.timeoutIntervalForResource = 600     // 전체 리소스 다운로드 타임아웃 (10분)
+        let session = URLSession(configuration: config)
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 600               // 🔹 request 자체에도 10분 타임아웃 설정
 
         // 3) 바디 구성
         var body = Data()
         let lineBreak = "\r\n"
         let fileName = fileURL.lastPathComponent          // 예: meeting-XXXX.m4a
 
-        // --boundary
         body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
-        // Content-Disposition: name, filename (여기서 확장자 포함된 파일명 전달)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\(lineBreak)".data(using: .utf8)!)
-        // Content-Type: 실제 MIME 타입
         body.append("Content-Type: audio/m4a\(lineBreak)\(lineBreak)".data(using: .utf8)!)
-        // 파일 바이너리
         body.append(audioData)
         body.append(lineBreak.data(using: .utf8)!)
-        // 종료 boundary
         body.append("--\(boundary)--\(lineBreak)".data(using: .utf8)!)
 
         // 4) 업로드
-        let task = URLSession.shared.uploadTask(with: request, from: body) { data, response, error in
+        let task = session.uploadTask(with: request, from: body) { [weak self] data, response, error in
+            guard let self = self else { return }
+
             DispatchQueue.main.async {
                 self.isUploading = false
             }
@@ -370,6 +399,10 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 return
             }
 
+            print("📡 HTTP status code: \(httpResponse.statusCode)")
+            print("📡 Response headers: \(httpResponse.allHeaderFields)")
+            print("📡 Response: \(httpResponse)")
+
             guard (200..<300).contains(httpResponse.statusCode) else {
                 DispatchQueue.main.async {
                     self.errorMessage = "서버 응답 코드: \(httpResponse.statusCode)"
@@ -382,6 +415,13 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                     self.errorMessage = "응답 데이터 없음"
                 }
                 return
+            }
+
+            // 🔹 JSON 파싱 전에 raw response를 먼저 로그로 찍기
+            if let responseText = String(data: data, encoding: .utf8) {
+                print("📩 Raw response body:\n\(responseText)")
+            } else {
+                print("📩 Raw response body (non-UTF8, length: \(data.count) bytes)")
             }
 
             do {
