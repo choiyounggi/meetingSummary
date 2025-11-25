@@ -11,6 +11,7 @@ import SwiftUI
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var window: NSWindow?
+    private let popover = NSPopover()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 메뉴바 아이템 생성
@@ -23,29 +24,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
             button.image?.isTemplate = true  // 다크/라이트 모드 자동
         }
+        statusItem.button?.action = #selector(togglePopover(_:))
+        statusItem.button?.target = self
 
-        // 메뉴 구성
-        let menu = NSMenu()
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 300, height: 360)
+        popover.contentViewController = NSHostingController(rootView: ContentView())
+    }
 
-        let openItem = NSMenuItem(
-            title: "창 열기",
-            action: #selector(openMainWindow),
-            keyEquivalent: "o"
-        )
-        openItem.target = self
+    @objc private func togglePopover(_ sender: Any?) {
+        guard let button = statusItem.button else { return }
 
-        let quitItem = NSMenuItem(
-            title: "종료",
-            action: #selector(quit),
-            keyEquivalent: "q"
-        )
-        quitItem.target = self
-
-        menu.addItem(openItem)
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(quitItem)
-
-        statusItem.menu = menu
+        if popover.isShown {
+            popover.performClose(sender)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     @objc private func openMainWindow() {
