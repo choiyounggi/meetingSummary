@@ -6,9 +6,11 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var recorder = AudioRecorder()
+    @State private var isDroppingFile: Bool = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -36,14 +38,21 @@ struct ContentView: View {
             // 파형 뷰
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(.gray.opacity(0.4), lineWidth: 1)
+                    .strokeBorder(isDroppingFile ? Color.blue.opacity(0.7) : Color.gray.opacity(0.4), lineWidth: isDroppingFile ? 2 : 1)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.gray.opacity(0.1))
+                            .fill((isDroppingFile ? Color.blue.opacity(0.1) : Color.gray.opacity(0.1)))
                     )
-
-                WaveformView(level: recorder.currentLevel)
-                    .padding(12)
+                
+                VStack(spacing: 8) {
+                    WaveformView(level: recorder.currentLevel)
+                        .padding(12)
+                    
+                    Text("여기에 음성 파일(m4a 등)을 드래그하면\n녹음 없이 바로 STT/요약을 진행합니다.")
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                }
             }
             .frame(height: 120)
             .padding(.horizontal, 16)
@@ -134,8 +143,55 @@ struct ContentView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
         }
+        .onDrop(of: [UTType.fileURL], isTargeted: $isDroppingFile) { providers in
+            handleFileDrop(providers: providers)
+        }
         .frame(width: 480, height: 420)
         .padding()
+    }
+
+    // 드래그&드롭된 파일 처리
+    private func handleFileDrop(providers: [NSItemProvider]) -> Bool {
+        // recorder를 먼저 로컬 상수로 캡처해두면
+        // 뷰(struct)의 self를 직접 캡처하지 않아도 되어서 더 안전함
+        let recorder = self.recorder
+
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier,
+                                  options: nil) { item, error in
+                    if let error = error {
+                        print("❌ 파일 로드 에러: \(error.localizedDescription)")
+                        return
+                    }
+                    guard let item = item else {
+                        print("❌ item 이 nil 입니다.")
+                        return
+                    }
+
+                    // 1) URL 타입으로 먼저 시도
+                    if let url = item as? URL {
+                        DispatchQueue.main.async {
+                            recorder.processExternalFile(url: url)
+                        }
+                        return
+                    }
+
+                    // 2) Data → URL 변환 시도
+                    if let data = item as? Data,
+                       let url = URL(dataRepresentation: data, relativeTo: nil) {
+                        DispatchQueue.main.async {
+                            recorder.processExternalFile(url: url)
+                        }
+                        return
+                    }
+
+                    print("❌ 지원하지 않는 타입: \(type(of: item))")
+                }
+                return true
+            }
+        }
+        return false
     }
 
     // 시간 포맷터 (초 → mm:ss)
