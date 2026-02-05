@@ -772,11 +772,11 @@ STT는 자동 변환된 내용이기 때문에 구어체·중복·말버릇·문
     private func buildNotionChildren(summary: String, transcript: String) -> [[String: Any]] {
         var children: [[String: Any]] = []
 
-        children.append(notionHeading2Block("[회의록 요약]"))
-        chunkText(summary, maxLength: 2000).forEach { chunk in
-            children.append(notionParagraphBlock(chunk))
-        }
+        // 요약: 마크다운을 Notion 블록으로 변환
+        children.append(contentsOf: parseMarkdownToNotionBlocks(summary))
 
+        // 원문: 기존 plain text 방식 유지
+        children.append(notionDividerBlock())
         children.append(notionHeading2Block("[원문]"))
         chunkText(transcript, maxLength: 2000).forEach { chunk in
             children.append(notionParagraphBlock(chunk))
@@ -790,9 +790,7 @@ STT는 자동 변환된 내용이기 때문에 구어체·중복·말버릇·문
             "object": "block",
             "type": "heading_2",
             "heading_2": [
-                "rich_text": [
-                    ["type": "text", "text": ["content": text]]
-                ]
+                "rich_text": parseRichText(text)
             ]
         ]
     }
@@ -802,9 +800,7 @@ STT는 자동 변환된 내용이기 때문에 구어체·중복·말버릇·문
             "object": "block",
             "type": "paragraph",
             "paragraph": [
-                "rich_text": [
-                    ["type": "text", "text": ["content": text]]
-                ]
+                "rich_text": parseRichText(text)
             ]
         ]
     }
@@ -825,6 +821,204 @@ STT는 자동 변환된 내용이기 때문에 구어체·중복·말버릇·문
         return chunks
     }
     
+    // MARK: - 마크다운 → Notion 블록 변환
+
+    /// 인라인 마크다운을 Notion rich_text 배열로 변환
+    private func parseRichText(_ text: String) -> [[String: Any]] {
+        let pattern = "(`[^`]+`|\\*\\*[^*]+\\*\\*|~~[^~]+~~|\\*[^*]+\\*)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return [richTextSegment(text)]
+        }
+
+        let nsText = text as NSString
+        var result: [[String: Any]] = []
+        var lastEnd = 0
+        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
+
+        for match in matches {
+            let matchRange = match.range
+
+            if matchRange.location > lastEnd {
+                let plain = nsText.substring(with: NSRange(location: lastEnd, length: matchRange.location - lastEnd))
+                if !plain.isEmpty {
+                    result.append(richTextSegment(plain))
+                }
+            }
+
+            let matched = nsText.substring(with: matchRange)
+            if matched.hasPrefix("**") && matched.hasSuffix("**") {
+                let content = String(matched.dropFirst(2).dropLast(2))
+                result.append(richTextSegment(content, bold: true))
+            } else if matched.hasPrefix("~~") && matched.hasSuffix("~~") {
+                let content = String(matched.dropFirst(2).dropLast(2))
+                result.append(richTextSegment(content, strikethrough: true))
+            } else if matched.hasPrefix("`") && matched.hasSuffix("`") {
+                let content = String(matched.dropFirst(1).dropLast(1))
+                result.append(richTextSegment(content, code: true))
+            } else if matched.hasPrefix("*") && matched.hasSuffix("*") {
+                let content = String(matched.dropFirst(1).dropLast(1))
+                result.append(richTextSegment(content, italic: true))
+            }
+
+            lastEnd = matchRange.location + matchRange.length
+        }
+
+        if lastEnd < nsText.length {
+            let remaining = nsText.substring(from: lastEnd)
+            if !remaining.isEmpty {
+                result.append(richTextSegment(remaining))
+            }
+        }
+
+        if result.isEmpty {
+            result.append(richTextSegment(text))
+        }
+
+        return result
+    }
+
+    private func richTextSegment(_ text: String, bold: Bool = false, italic: Bool = false, code: Bool = false, strikethrough: Bool = false) -> [String: Any] {
+        var segment: [String: Any] = [
+            "type": "text",
+            "text": ["content": text]
+        ]
+        if bold || italic || code || strikethrough {
+            var annotations: [String: Any] = [:]
+            if bold { annotations["bold"] = true }
+            if italic { annotations["italic"] = true }
+            if code { annotations["code"] = true }
+            if strikethrough { annotations["strikethrough"] = true }
+            segment["annotations"] = annotations
+        }
+        return segment
+    }
+
+    /// 마크다운 텍스트를 줄 단위로 파싱하여 Notion 블록 배열로 변환
+    private func parseMarkdownToNotionBlocks(_ markdown: String) -> [[String: Any]] {
+        let lines = markdown.components(separatedBy: "\n")
+        var blocks: [[String: Any]] = []
+
+        var i = 0
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.isEmpty {
+                i += 1
+                continue
+            }
+
+            if trimmed.hasPrefix("### ") {
+                let content = String(trimmed.dropFirst(4))
+                blocks.append(notionHeading3Block(content))
+            } else if trimmed.hasPrefix("## ") {
+                let content = String(trimmed.dropFirst(3))
+                blocks.append(notionHeading2Block(content))
+            } else if trimmed.hasPrefix("# ") {
+                let content = String(trimmed.dropFirst(2))
+                blocks.append(notionHeading1Block(content))
+            } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+                blocks.append(notionDividerBlock())
+            } else if trimmed.hasPrefix("- [ ] ") {
+                let content = String(trimmed.dropFirst(6))
+                blocks.append(notionTodoBlock(content, checked: false))
+            } else if trimmed.hasPrefix("- [x] ") || trimmed.hasPrefix("- [X] ") {
+                let content = String(trimmed.dropFirst(6))
+                blocks.append(notionTodoBlock(content, checked: true))
+            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("• ") {
+                let content = String(trimmed.dropFirst(2))
+
+                // 들여쓴 하위 bullet 수집
+                var children: [[String: Any]] = []
+                while i + 1 < lines.count {
+                    let nextLine = lines[i + 1]
+                    let nextTrimmed = nextLine.trimmingCharacters(in: .whitespaces)
+                    let isIndented = nextLine.hasPrefix(" ") || nextLine.hasPrefix("\t")
+
+                    if isIndented && (nextTrimmed.hasPrefix("- ") || nextTrimmed.hasPrefix("• ")) {
+                        let childContent = String(nextTrimmed.dropFirst(2))
+                        children.append(notionBulletBlock(childContent))
+                        i += 1
+                    } else {
+                        break
+                    }
+                }
+
+                if children.isEmpty {
+                    blocks.append(notionBulletBlock(content))
+                } else {
+                    blocks.append(notionBulletBlockWithChildren(content, children: children))
+                }
+            } else {
+                blocks.append(notionParagraphBlock(trimmed))
+            }
+
+            i += 1
+        }
+
+        return blocks
+    }
+
+    private func notionHeading1Block(_ text: String) -> [String: Any] {
+        return [
+            "object": "block",
+            "type": "heading_1",
+            "heading_1": [
+                "rich_text": parseRichText(text)
+            ]
+        ]
+    }
+
+    private func notionHeading3Block(_ text: String) -> [String: Any] {
+        return [
+            "object": "block",
+            "type": "heading_3",
+            "heading_3": [
+                "rich_text": parseRichText(text)
+            ]
+        ]
+    }
+
+    private func notionDividerBlock() -> [String: Any] {
+        return [
+            "object": "block",
+            "type": "divider",
+            "divider": [:] as [String: Any]
+        ]
+    }
+
+    private func notionTodoBlock(_ text: String, checked: Bool) -> [String: Any] {
+        return [
+            "object": "block",
+            "type": "to_do",
+            "to_do": [
+                "rich_text": parseRichText(text),
+                "checked": checked
+            ] as [String: Any]
+        ]
+    }
+
+    private func notionBulletBlock(_ text: String) -> [String: Any] {
+        return [
+            "object": "block",
+            "type": "bulleted_list_item",
+            "bulleted_list_item": [
+                "rich_text": parseRichText(text)
+            ]
+        ]
+    }
+
+    private func notionBulletBlockWithChildren(_ text: String, children: [[String: Any]]) -> [String: Any] {
+        return [
+            "object": "block",
+            "type": "bulleted_list_item",
+            "bulleted_list_item": [
+                "rich_text": parseRichText(text),
+                "children": children
+            ] as [String: Any]
+        ]
+    }
+
     // MARK: - Slack 웹훅 알림
 
     private func sendSlackNotification(title: String, notionURL: String) {
