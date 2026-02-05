@@ -781,32 +781,23 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
 
         // 원문: 기존 plain text 방식 유지
         children.append(notionDividerBlock())
-        children.append(notionHeading2Block("[원문]"))
+        children.append(contentsOf: notionHeading2Blocks("[원문]"))
         chunkText(transcript, maxLength: 2000).forEach { chunk in
-            children.append(notionParagraphBlock(chunk))
+            children.append(contentsOf: notionParagraphBlocks(chunk))
         }
 
         return children
     }
 
-    private func notionHeading2Block(_ text: String) -> [String: Any] {
-        return [
-            "object": "block",
-            "type": "heading_2",
-            "heading_2": [
-                "rich_text": parseRichText(text)
-            ]
-        ]
+    private let notionRichTextLimit = 2000
+    private let notionRichTextArrayLimit = 100
+
+    private func notionHeading2Blocks(_ text: String) -> [[String: Any]] {
+        return buildRichTextBlocks(type: "heading_2", richText: parseRichText(text))
     }
 
-    private func notionParagraphBlock(_ text: String) -> [String: Any] {
-        return [
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": [
-                "rich_text": parseRichText(text)
-            ]
-        ]
+    private func notionParagraphBlocks(_ text: String) -> [[String: Any]] {
+        return buildRichTextBlocks(type: "paragraph", richText: parseRichText(text))
     }
 
     private func chunkText(_ text: String, maxLength: Int) -> [String] {
@@ -823,6 +814,57 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
         }
 
         return chunks
+    }
+
+    private func splitTextByLength(_ text: String, maxLength: Int) -> [String] {
+        guard maxLength > 0 else { return [text] }
+
+        var chunks: [String] = []
+        var start = text.startIndex
+
+        while start < text.endIndex {
+            let endIndex = text.index(start, offsetBy: maxLength, limitedBy: text.endIndex) ?? text.endIndex
+            chunks.append(String(text[start..<endIndex]))
+            start = endIndex
+        }
+
+        return chunks
+    }
+
+    private func chunkRichTextArray(_ richText: [[String: Any]], maxCount: Int) -> [[[String: Any]]] {
+        guard maxCount > 0 else { return [richText] }
+        guard !richText.isEmpty else { return [] }
+
+        var chunks: [[[String: Any]]] = []
+        var index = 0
+
+        while index < richText.count {
+            let end = min(index + maxCount, richText.count)
+            chunks.append(Array(richText[index..<end]))
+            index = end
+        }
+
+        return chunks
+    }
+
+    private func buildRichTextBlocks(type: String, richText: [[String: Any]], extra: [String: Any] = [:], children: [[String: Any]]? = nil) -> [[String: Any]] {
+        let chunks = chunkRichTextArray(richText, maxCount: notionRichTextArrayLimit)
+        return chunks.enumerated().map { index, chunk in
+            var content: [String: Any] = ["rich_text": chunk]
+            extra.forEach { key, value in
+                content[key] = value
+            }
+
+            if let children = children, !children.isEmpty, index == 0 {
+                content["children"] = children
+            }
+
+            return [
+                "object": "block",
+                "type": type,
+                type: content
+            ]
+        }
     }
     
     // MARK: - 마크다운 → Notion 블록 변환
@@ -845,23 +887,23 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
             if matchRange.location > lastEnd {
                 let plain = nsText.substring(with: NSRange(location: lastEnd, length: matchRange.location - lastEnd))
                 if !plain.isEmpty {
-                    result.append(richTextSegment(plain))
+                    appendRichText(plain, to: &result)
                 }
             }
 
             let matched = nsText.substring(with: matchRange)
             if matched.hasPrefix("**") && matched.hasSuffix("**") {
                 let content = String(matched.dropFirst(2).dropLast(2))
-                result.append(richTextSegment(content, bold: true))
+                appendRichText(content, bold: true, to: &result)
             } else if matched.hasPrefix("~~") && matched.hasSuffix("~~") {
                 let content = String(matched.dropFirst(2).dropLast(2))
-                result.append(richTextSegment(content, strikethrough: true))
+                appendRichText(content, strikethrough: true, to: &result)
             } else if matched.hasPrefix("`") && matched.hasSuffix("`") {
                 let content = String(matched.dropFirst(1).dropLast(1))
-                result.append(richTextSegment(content, code: true))
+                appendRichText(content, code: true, to: &result)
             } else if matched.hasPrefix("*") && matched.hasSuffix("*") {
                 let content = String(matched.dropFirst(1).dropLast(1))
-                result.append(richTextSegment(content, italic: true))
+                appendRichText(content, italic: true, to: &result)
             }
 
             lastEnd = matchRange.location + matchRange.length
@@ -870,15 +912,22 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
         if lastEnd < nsText.length {
             let remaining = nsText.substring(from: lastEnd)
             if !remaining.isEmpty {
-                result.append(richTextSegment(remaining))
+                appendRichText(remaining, to: &result)
             }
         }
 
         if result.isEmpty {
-            result.append(richTextSegment(text))
+            appendRichText(text, to: &result)
         }
 
         return result
+    }
+
+    private func appendRichText(_ text: String, bold: Bool = false, italic: Bool = false, code: Bool = false, strikethrough: Bool = false, to result: inout [[String: Any]]) {
+        splitTextByLength(text, maxLength: notionRichTextLimit).forEach { piece in
+            guard !piece.isEmpty else { return }
+            result.append(richTextSegment(piece, bold: bold, italic: italic, code: code, strikethrough: strikethrough))
+        }
     }
 
     private func richTextSegment(_ text: String, bold: Bool = false, italic: Bool = false, code: Bool = false, strikethrough: Bool = false) -> [String: Any] {
@@ -914,21 +963,21 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
 
             if trimmed.hasPrefix("### ") {
                 let content = String(trimmed.dropFirst(4))
-                blocks.append(notionHeading3Block(content))
+                blocks.append(contentsOf: notionHeading3Blocks(content))
             } else if trimmed.hasPrefix("## ") {
                 let content = String(trimmed.dropFirst(3))
-                blocks.append(notionHeading2Block(content))
+                blocks.append(contentsOf: notionHeading2Blocks(content))
             } else if trimmed.hasPrefix("# ") {
                 let content = String(trimmed.dropFirst(2))
-                blocks.append(notionHeading1Block(content))
+                blocks.append(contentsOf: notionHeading1Blocks(content))
             } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
                 blocks.append(notionDividerBlock())
             } else if trimmed.hasPrefix("- [ ] ") {
                 let content = String(trimmed.dropFirst(6))
-                blocks.append(notionTodoBlock(content, checked: false))
+                blocks.append(contentsOf: notionTodoBlocks(content, checked: false))
             } else if trimmed.hasPrefix("- [x] ") || trimmed.hasPrefix("- [X] ") {
                 let content = String(trimmed.dropFirst(6))
-                blocks.append(notionTodoBlock(content, checked: true))
+                blocks.append(contentsOf: notionTodoBlocks(content, checked: true))
             } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("• ") {
                 let content = String(trimmed.dropFirst(2))
 
@@ -941,7 +990,7 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
 
                     if isIndented && (nextTrimmed.hasPrefix("- ") || nextTrimmed.hasPrefix("• ")) {
                         let childContent = String(nextTrimmed.dropFirst(2))
-                        children.append(notionBulletBlock(childContent))
+                        children.append(contentsOf: notionBulletBlocks(childContent))
                         i += 1
                     } else {
                         break
@@ -949,12 +998,12 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
                 }
 
                 if children.isEmpty {
-                    blocks.append(notionBulletBlock(content))
+                    blocks.append(contentsOf: notionBulletBlocks(content))
                 } else {
-                    blocks.append(notionBulletBlockWithChildren(content, children: children))
+                    blocks.append(contentsOf: notionBulletBlocksWithChildren(content, children: children))
                 }
             } else {
-                blocks.append(notionParagraphBlock(trimmed))
+                blocks.append(contentsOf: notionParagraphBlocks(trimmed))
             }
 
             i += 1
@@ -963,24 +1012,12 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
         return blocks
     }
 
-    private func notionHeading1Block(_ text: String) -> [String: Any] {
-        return [
-            "object": "block",
-            "type": "heading_1",
-            "heading_1": [
-                "rich_text": parseRichText(text)
-            ]
-        ]
+    private func notionHeading1Blocks(_ text: String) -> [[String: Any]] {
+        return buildRichTextBlocks(type: "heading_1", richText: parseRichText(text))
     }
 
-    private func notionHeading3Block(_ text: String) -> [String: Any] {
-        return [
-            "object": "block",
-            "type": "heading_3",
-            "heading_3": [
-                "rich_text": parseRichText(text)
-            ]
-        ]
+    private func notionHeading3Blocks(_ text: String) -> [[String: Any]] {
+        return buildRichTextBlocks(type: "heading_3", richText: parseRichText(text))
     }
 
     private func notionDividerBlock() -> [String: Any] {
@@ -991,36 +1028,16 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
         ]
     }
 
-    private func notionTodoBlock(_ text: String, checked: Bool) -> [String: Any] {
-        return [
-            "object": "block",
-            "type": "to_do",
-            "to_do": [
-                "rich_text": parseRichText(text),
-                "checked": checked
-            ] as [String: Any]
-        ]
+    private func notionTodoBlocks(_ text: String, checked: Bool) -> [[String: Any]] {
+        return buildRichTextBlocks(type: "to_do", richText: parseRichText(text), extra: ["checked": checked])
     }
 
-    private func notionBulletBlock(_ text: String) -> [String: Any] {
-        return [
-            "object": "block",
-            "type": "bulleted_list_item",
-            "bulleted_list_item": [
-                "rich_text": parseRichText(text)
-            ]
-        ]
+    private func notionBulletBlocks(_ text: String) -> [[String: Any]] {
+        return buildRichTextBlocks(type: "bulleted_list_item", richText: parseRichText(text))
     }
 
-    private func notionBulletBlockWithChildren(_ text: String, children: [[String: Any]]) -> [String: Any] {
-        return [
-            "object": "block",
-            "type": "bulleted_list_item",
-            "bulleted_list_item": [
-                "rich_text": parseRichText(text),
-                "children": children
-            ] as [String: Any]
-        ]
+    private func notionBulletBlocksWithChildren(_ text: String, children: [[String: Any]]) -> [[String: Any]] {
+        return buildRichTextBlocks(type: "bulleted_list_item", richText: parseRichText(text), children: children)
     }
 
     // MARK: - Slack 웹훅 알림
