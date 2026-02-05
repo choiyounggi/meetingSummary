@@ -408,6 +408,8 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                         switch notionResult {
                         case .success(let pageURL):
                             self.notionPageURL = pageURL
+                            let title = self.buildNotionTitle(from: summary)
+                            self.sendSlackNotification(title: title, notionURL: pageURL)
                         case .failure(let error):
                             self.errorMessage = "Notion 등록 실패: \(error.localizedDescription)"
                         }
@@ -823,6 +825,42 @@ STT는 자동 변환된 내용이기 때문에 구어체·중복·말버릇·문
         return chunks
     }
     
+    // MARK: - Slack 웹훅 알림
+
+    private func sendSlackNotification(title: String, notionURL: String) {
+        guard let url = URL(string: "REDACTED_SLACK_WEBHOOK") else { return }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let timeString = formatter.string(from: Date())
+
+        let message = "📝 *\(title)*\n🕐 \(timeString)\n🔗 <\(notionURL)|Notion에서 보기>"
+
+        let payload: [String: Any] = ["text": message]
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            print("⚠️ Slack 웹훅 페이로드 생성 실패: \(error)")
+            return
+        }
+
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            if let error = error {
+                print("⚠️ Slack 웹훅 전송 실패: \(error.localizedDescription)")
+                return
+            }
+            if let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) {
+                print("✅ Slack 웹훅 전송 성공")
+            }
+        }.resume()
+    }
+
     /// 대용량 오디오 파일을 일정 길이(예: 10분) 단위로 나누어 순차적으로 STT 수행 후 하나의 텍스트로 합칩니다.
     private func transcribeLargeAudio(fileURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
         let asset = AVURLAsset(url: fileURL)
