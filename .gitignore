@@ -41,6 +41,7 @@ playground.xcworkspace
 
 # Xcode Archive export
 *.app
+MeetingSummaryApp 20*/
 
 # Debug logs
 *.log
