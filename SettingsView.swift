@@ -5,112 +5,116 @@ struct SettingsView: View {
     @State private var showOpenAIKey: Bool = false
     @State private var showAnthropicKey: Bool = false
     @State private var showNotionKey: Bool = false
-
-    private let labelWidth: CGFloat = 110
-    private let buttonWidth: CGFloat = 68   // "표시"/"숨기기" 여유폭
-    private let minFieldWidth: CGFloat = 220
-    private let maxFieldWidth: CGFloat = 360
+    @State private var isAPIExpanded: Bool = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("설정")
-                .font(.title2)
-                .padding(.top, 8)
+        VStack(spacing: 10) {
+            // API 키 카드
+            CardSection(
+                title: "API 키",
+                icon: "key.fill",
+                isExpanded: $isAPIExpanded
+            ) {
+                VStack(spacing: 14) {
+                    apiKeyRow(
+                        label: "OpenAI",
+                        placeholder: "sk-...",
+                        value: $settings.openAIKey,
+                        isVisible: $showOpenAIKey
+                    )
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("API 키")
-                    .font(.headline)
+                    Divider()
 
-                // OpenAI
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("OpenAI 키")
-                        .frame(width: labelWidth, alignment: .leading)
+                    apiKeyRow(
+                        label: "Anthropic",
+                        placeholder: "sk-ant-...",
+                        value: $settings.anthropicKey,
+                        isVisible: $showAnthropicKey
+                    )
 
-                    // 필드가 남은 공간을 우선 차지하고, 버튼은 항상 보이도록 trailing에 고정
-                    if showOpenAIKey {
-                        TextField("sk-...", text: $settings.openAIKey)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: minFieldWidth, maxWidth: maxFieldWidth)
-                    } else {
-                        SecureField("sk-...", text: $settings.openAIKey)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: minFieldWidth, maxWidth: maxFieldWidth)
+                    Divider()
+
+                    apiKeyRow(
+                        label: "Notion",
+                        placeholder: "ntn_...",
+                        value: $settings.notionKey,
+                        isVisible: $showNotionKey
+                    )
+
+                    // 저장 버튼
+                    HStack {
+                        Spacer()
+                        Button {
+                            settings.save(
+                                openAI: settings.openAIKey,
+                                anthropic: settings.anthropicKey,
+                                notion: settings.notionKey
+                            )
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11))
+                                Text("저장")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color(nsColor: NSColor(red: 0.25, green: 0.25, blue: 0.3, alpha: 1.0)))
                     }
-
-                    Spacer(minLength: 8)
-
-                    Button(showOpenAIKey ? "숨기기" : "표시") {
-                        showOpenAIKey.toggle()
-                    }
-                    .frame(width: buttonWidth)
-                    .buttonStyle(.bordered)
-                }
-
-                // Anthropic
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("Anthropic 키")
-                        .frame(width: labelWidth, alignment: .leading)
-
-                    if showAnthropicKey {
-                        TextField("anthropic-key...", text: $settings.anthropicKey)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: minFieldWidth, maxWidth: maxFieldWidth)
-                    } else {
-                        SecureField("anthropic-key...", text: $settings.anthropicKey)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: minFieldWidth, maxWidth: maxFieldWidth)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Button(showAnthropicKey ? "숨기기" : "표시") {
-                        showAnthropicKey.toggle()
-                    }
-                    .frame(width: buttonWidth)
-                    .buttonStyle(.bordered)
-                }
-
-                // Notion
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("Notion 키")
-                        .frame(width: labelWidth, alignment: .leading)
-
-                    if showNotionKey {
-                        TextField("ntn_...", text: $settings.notionKey)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: minFieldWidth, maxWidth: maxFieldWidth)
-                    } else {
-                        SecureField("ntn_...", text: $settings.notionKey)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: minFieldWidth, maxWidth: maxFieldWidth)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Button(showNotionKey ? "숨기기" : "표시") {
-                        showNotionKey.toggle()
-                    }
-                    .frame(width: buttonWidth)
-                    .buttonStyle(.bordered)
+                    .padding(.top, 4)
                 }
             }
+            .padding(.horizontal, 16)
 
-            Divider()
-
-            HStack {
-                Spacer()
-                Button("저장") {
-                    settings.save(openAI: settings.openAIKey, anthropic: settings.anthropicKey, notion: settings.notionKey)
-                }
-                .buttonStyle(.borderedProminent)
-            }
+            Spacer(minLength: 8)
         }
-        .padding(16)
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private func apiKeyRow(
+        label: String,
+        placeholder: String,
+        value: Binding<String>,
+        isVisible: Binding<Bool>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button {
+                    isVisible.wrappedValue.toggle()
+                } label: {
+                    Image(systemName: isVisible.wrappedValue ? "eye.slash" : "eye")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Group {
+                if isVisible.wrappedValue {
+                    TextField(placeholder, text: value)
+                } else {
+                    SecureField(placeholder, text: value)
+                }
+            }
+            .textFieldStyle(.plain)
+            .font(.system(size: 12, design: .monospaced))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 0.5)
+            )
+        }
     }
 }

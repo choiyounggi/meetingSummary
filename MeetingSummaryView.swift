@@ -8,142 +8,315 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+// MARK: - 카드 섹션 컴포넌트
+struct CardSection<Content: View>: View {
+    let title: String
+    let icon: String
+    var isExpanded: Binding<Bool>? = nil
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 섹션 헤더
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+
+                Spacer()
+
+                if let binding = isExpanded {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            binding.wrappedValue.toggle()
+                        }
+                    } label: {
+                        Image(systemName: binding.wrappedValue ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            if isExpanded?.wrappedValue != false {
+                Divider()
+                    .padding(.horizontal, 14)
+
+                content()
+                    .padding(14)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - 상태 배지
+struct StatusBadge: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(color)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(color.opacity(0.1))
+        )
+    }
+}
+
+// MARK: - 메인 뷰
 struct MeetingSummaryView: View {
     @StateObject private var recorder = AudioRecorder()
     @State private var isDroppingFile: Bool = false
+    @State private var isRecordingExpanded: Bool = true
+    @State private var isPlaybackExpanded: Bool = true
+    @State private var isSummaryExpanded: Bool = true
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("회의 녹음 & 요약")
-                .font(.title2)
-                .padding(.top, 12)
-
-            if recorder.isRecording {
-                Text("녹음 중...")
-                    .foregroundColor(.red)
-                    .font(.headline)
-            } else if recorder.isUploading {
-                Text("업로드 및 요약 생성 중...")
-                    .foregroundColor(.blue)
+        VStack(spacing: 10) {
+            // 상태 표시
+            if recorder.isRecording || recorder.isUploading {
+                HStack {
+                    Spacer()
+                    if recorder.isRecording {
+                        StatusBadge(text: "녹음 중", color: .red)
+                    } else if recorder.isUploading {
+                        StatusBadge(text: "처리 중...", color: .blue)
+                    }
+                    Spacer()
+                }
+                .padding(.top, 4)
             }
 
+            // 에러 메시지
             if let error = recorder.errorMessage {
-                Text(error)
-                    .foregroundColor(.red)
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                    Text(error)
+                        .font(.system(size: 11))
+                }
+                .foregroundColor(.red)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.red.opacity(0.08))
+                )
+                .padding(.horizontal, 16)
             }
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(isDroppingFile ? Color.blue.opacity(0.7) : Color.gray.opacity(0.4), lineWidth: isDroppingFile ? 2 : 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill((isDroppingFile ? Color.blue.opacity(0.1) : Color.gray.opacity(0.1)))
-                    )
+            // 녹음 카드
+            CardSection(
+                title: "녹음",
+                icon: "mic.fill",
+                isExpanded: $isRecordingExpanded
+            ) {
+                VStack(spacing: 12) {
+                    // 파형 + 드롭존
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isDroppingFile
+                                  ? Color.accentColor.opacity(0.06)
+                                  : Color(nsColor: .windowBackgroundColor))
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(
+                                isDroppingFile
+                                ? Color.accentColor.opacity(0.5)
+                                : Color(nsColor: .separatorColor).opacity(0.3),
+                                style: StrokeStyle(lineWidth: 1, dash: isDroppingFile ? [] : [5, 3])
+                            )
 
-                VStack(spacing: 8) {
-                    WaveformView(level: recorder.currentLevel)
-                        .padding(12)
+                        VStack(spacing: 6) {
+                            WaveformView(level: recorder.currentLevel)
+                                .frame(height: 36)
+                                .padding(.horizontal, 16)
 
-                    Text("여기에 음성 파일(m4a 등)을 드래그하면\n녹음 없이 바로 STT/요약을 진행합니다.")
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(.secondary)
+                            Text("음성 파일(m4a 등)을 드래그하여 바로 처리")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .frame(height: 80)
+                    .onDrop(of: [UTType.fileURL], isTargeted: $isDroppingFile) { providers in
+                        handleFileDrop(providers: providers)
+                    }
+
+                    // 녹음 버튼
+                    HStack(spacing: 12) {
+                        Button {
+                            recorder.startRecording()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "mic.fill")
+                                    .font(.system(size: 12))
+                                Text("녹음 시작")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color(nsColor: NSColor(red: 0.25, green: 0.25, blue: 0.3, alpha: 1.0)))
+                        .disabled(recorder.isRecording || recorder.isUploading)
+
+                        Button {
+                            recorder.stopRecording()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "stop.fill")
+                                    .font(.system(size: 12))
+                                Text("녹음 종료")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!recorder.isRecording)
+                    }
                 }
             }
-            .frame(height: 120)
             .padding(.horizontal, 16)
-            .onDrop(of: [UTType.fileURL], isTargeted: $isDroppingFile) { providers in
-                handleFileDrop(providers: providers)
-            }
 
-            if recorder.hasRecording {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("녹음 재생")
-                        .font(.headline)
-
-                    HStack {
-                        Button(action: {
+            // 재생 카드
+            CardSection(
+                title: "녹음 재생",
+                icon: "play.circle",
+                isExpanded: $isPlaybackExpanded
+            ) {
+                if recorder.hasRecording {
+                    HStack(spacing: 10) {
+                        Button {
                             if recorder.isPlaying {
                                 recorder.pause()
                             } else {
                                 recorder.play()
                             }
-                        }) {
+                        } label: {
                             Image(systemName: recorder.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 13))
+                                .foregroundColor(.primary)
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    Circle()
+                                        .fill(Color(nsColor: .windowBackgroundColor))
+                                )
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 0.5)
+                                )
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.plain)
 
-                        Slider(
-                            value: Binding(
-                                get: { recorder.playbackCurrentTime },
-                                set: { newValue in
-                                    recorder.seek(to: newValue)
-                                }
-                            ),
-                            in: 0...max(recorder.playbackDuration, 0.1)
-                        )
+                        VStack(spacing: 4) {
+                            Slider(
+                                value: Binding(
+                                    get: { recorder.playbackCurrentTime },
+                                    set: { newValue in recorder.seek(to: newValue) }
+                                ),
+                                in: 0...max(recorder.playbackDuration, 0.1)
+                            )
+                            .controlSize(.small)
 
-                        Text("\(formatTime(recorder.playbackCurrentTime)) / \(formatTime(recorder.playbackDuration))")
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 110, alignment: .trailing)
-                    }
-                }
-                .padding(.horizontal, 16)
-            } else {
-                Text("녹음 종료 후 이곳에서 음성을 다시 재생할 수 있습니다.")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 16)
-            }
-
-            HStack(spacing: 24) {
-                Button(action: {
-                    recorder.startRecording()
-                }) {
-                    Label("녹음 시작", systemImage: "mic.fill")
-                }
-                .disabled(recorder.isRecording || recorder.isUploading)
-
-                Button(action: {
-                    recorder.stopRecording()
-                }) {
-                    Label("녹음 종료", systemImage: "stop.fill")
-                }
-                .disabled(!recorder.isRecording)
-            }
-            .buttonStyle(.borderedProminent)
-
-            Divider()
-                .padding(.horizontal, 16)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("회의록")
-                    .font(.headline)
-
-                if let notionURL = recorder.notionPageURL,
-                   let url = URL(string: notionURL) {
-                    Link(destination: url) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc.text")
-                            Text("Notion에서 회의록 보기")
+                            HStack {
+                                Text(formatTime(recorder.playbackCurrentTime))
+                                Spacer()
+                                Text(formatTime(recorder.playbackDuration))
+                            }
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
                         }
-                        .font(.footnote)
                     }
-                } else if recorder.isUploading {
-                    Text("요약 및 Notion 등록 중...")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
                 } else {
-                    Text("완료되면 Notion 회의록 링크가 표시됩니다.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 6) {
+                        Image(systemName: "speaker.slash")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Text("녹음 완료 후 재생할 수 있습니다")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 4)
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 12)
+
+            // 회의록 카드
+            CardSection(
+                title: "회의록",
+                icon: "doc.text",
+                isExpanded: $isSummaryExpanded
+            ) {
+                if let notionURL = recorder.notionPageURL,
+                   let url = URL(string: notionURL) {
+                    Link(destination: url) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.system(size: 13))
+                            Text("Notion에서 회의록 보기")
+                                .font(.system(size: 13, weight: .medium))
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } else if recorder.isUploading {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("요약 및 Notion 등록 중...")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 4)
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.badge.clock")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Text("완료되면 Notion 링크가 표시됩니다")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 4)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            Spacer(minLength: 8)
         }
+        .padding(.vertical, 8)
     }
 
     private func handleFileDrop(providers: [NSItemProvider]) -> Bool {
@@ -154,11 +327,11 @@ struct MeetingSummaryView: View {
                 provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier,
                                   options: nil) { item, error in
                     if let error = error {
-                        print("❌ 파일 로드 에러: \(error.localizedDescription)")
+                        print("파일 로드 에러: \(error.localizedDescription)")
                         return
                     }
                     guard let item = item else {
-                        print("❌ item 이 nil 입니다.")
+                        print("item 이 nil 입니다.")
                         return
                     }
 
@@ -177,7 +350,7 @@ struct MeetingSummaryView: View {
                         return
                     }
 
-                    print("❌ 지원하지 않는 타입: \(type(of: item))")
+                    print("지원하지 않는 타입: \(type(of: item))")
                 }
                 return true
             }
