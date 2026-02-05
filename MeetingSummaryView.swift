@@ -119,19 +119,24 @@ struct MeetingSummaryView: View {
                 .padding(.horizontal, 16)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("회의 요약 결과")
+                Text("회의록")
                     .font(.headline)
 
-                if let url = recorder.summaryURL {
+                if let notionURL = recorder.notionPageURL,
+                   let url = URL(string: notionURL) {
                     Link(destination: url) {
-                        Text(url.absoluteString)
-                            .font(.footnote)
-                            .foregroundColor(.blue)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.text")
+                            Text("Notion에서 회의록 보기")
+                        }
+                        .font(.footnote)
                     }
+                } else if recorder.isUploading {
+                    Text("요약 및 Notion 등록 중...")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 } else {
-                    Text("녹음을 종료하면 이곳에 요약 URL이 표시됩니다.")
+                    Text("완료되면 Notion 회의록 링크가 표시됩니다.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
@@ -188,4 +193,3 @@ struct MeetingSummaryView: View {
         return String(format: "%02d:%02d", m, s)
     }
 }
-

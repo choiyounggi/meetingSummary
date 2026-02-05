@@ -20,7 +20,9 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var isRecording: Bool = false
     @Published var currentLevel: CGFloat = 0.0      // 파동 0.0 ~ 1.0
     @Published var isUploading: Bool = false
-    @Published var summaryURL: URL?
+    @Published var transcriptText: String?
+    @Published var summaryText: String?
+    @Published var notionPageURL: String?
     @Published var errorMessage: String?
 
     // MARK: - Playback 상태
@@ -45,7 +47,9 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
             // 2) 권한이 허용된 경우에만 실제 녹음 시작 로직 수행
             // 업로드/재생 관련 상태 초기화
-            self.summaryURL = nil
+            self.transcriptText = nil
+            self.summaryText = nil
+            self.notionPageURL = nil
             self.errorMessage = nil
             self.stopPlaybackIfNeeded()
             self.hasRecording = false
@@ -319,6 +323,9 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private func uploadAudio(fileURL: URL) {
         isUploading = true
         errorMessage = nil
+        transcriptText = nil
+        summaryText = nil
+        notionPageURL = nil
         
         let path = fileURL.path
         var fileSize: Int64 = 0
@@ -345,7 +352,7 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                     }
                 case .success(let transcript):
                     print("📝 STT transcript (chunked) length: \(transcript.count) chars")
-                    self.sendTranscriptToN8N(transcript: transcript)
+                    self.handleTranscript(transcript)
                 }
             }
         } else {
@@ -373,7 +380,38 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                     }
                 case .success(let transcript):
                     print("📝 STT transcript length: \(transcript.count) chars")
-                    self.sendTranscriptToN8N(transcript: transcript)
+                    self.handleTranscript(transcript)
+                }
+            }
+        }
+    }
+
+    private func handleTranscript(_ transcript: String) {
+        DispatchQueue.main.async {
+            self.transcriptText = transcript
+        }
+        summarizeWithClaude(transcript: transcript) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    self.isUploading = false
+                    self.errorMessage = "요약 실패: \(error.localizedDescription)"
+                }
+            case .success(let summary):
+                DispatchQueue.main.async {
+                    self.summaryText = summary
+                }
+                self.createNotionPage(summary: summary, transcript: transcript) { notionResult in
+                    DispatchQueue.main.async {
+                        self.isUploading = false
+                        switch notionResult {
+                        case .success(let pageURL):
+                            self.notionPageURL = pageURL
+                        case .failure(let error):
+                            self.errorMessage = "Notion 등록 실패: \(error.localizedDescription)"
+                        }
+                    }
                 }
             }
         }
@@ -404,7 +442,6 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         
-        // ✅ SettingsManager에서 OpenAI 키 사용
         let openAIKey = SettingsManager.shared.openAIKey
         request.setValue("Bearer \(openAIKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 900
@@ -468,110 +505,322 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         task.resume()
     }
     
-    // n8n 응답 파싱용 구조체 (요약 결과 URL 포함)
-    private struct N8NSummaryResponse: Decodable {
-        let summaryUrl: String?
-        let url: String?
+    // MARK: - Anthropic Claude 요약
+    private struct AnthropicMessageResponse: Decodable {
+        struct ContentBlock: Decodable {
+            let type: String
+            let text: String?
+        }
+
+        let content: [ContentBlock]
     }
-    
-    // MARK: - n8n 워크플로우 호출 (STT 텍스트 전달)
-    
-    private func sendTranscriptToN8N(transcript: String) {
-        guard let url = URL(string: "https://www.linkly.kr/n8n/webhook/098e8967-d9fc-4cbc-affa-92efff9fcff9") else {
-            DispatchQueue.main.async {
-                self.isUploading = false
-                self.errorMessage = "잘못된 n8n API URL"
-            }
+
+    private func summarizeWithClaude(transcript: String, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+            completion(.failure(NSError(domain: "AudioRecorder", code: -30, userInfo: [NSLocalizedDescriptionKey: "잘못된 Claude API URL"])))
             return
         }
-        
+
+        let anthropicKey = SettingsManager.shared.anthropicKey
+        let model = "claude-sonnet-4-20250514"
+        let systemPrompt = ""
+
+        let userPrompt = """
+당신은 알스퀘어(Rsquare)의 상업용 부동산 서비스 중 하나인 RTB(Real-time Brokerage) 서비스의
+IT 개발팀 회의록 전문 정리자입니다.
+
+이 팀은 내부 직원들이 사용하는 웹 서비스를 개발하는 팀이며,
+RTB 전면 개편 프로젝트(예정: 2026년 말 출시)를 준비하고 있습니다.
+
+다음 팀원이 회의에 참여할 수 있습니다:
+- 개발자: @박상용(팀장), @복영균(이사), @양준철(TL), @이종호, @홍채민, @최영기, @조재용, @김민정
+- PM(기획): @이미정, @최병선, @서연정
+
+STT는 자동 변환된 내용이기 때문에 구어체·중복·말버릇·문장 깨짐이 있을 수 있으므로
+이를 자연스럽게 다듬고 문맥을 보완해 정확한 회의록 형태로 재구성해 주세요.
+
+아래 규칙을 반드시 지켜 요약을 작성해주세요.
+
+-----------------------------------
+## 📌 **출력 규칙 (중요)**
+
+### 1) 멤버 멘션 처리
+- 팀원의 이름이 등장하면 반드시 @이름 형태로 표기
+- 예: “상용님이 말했습니다” → “@박상용 의견: …”
+
+### 2) 2천자가 넘지 않는 선에서 최대한 디테일하게 정리
+아래 섹션 구조를 반드시 유지한다:
+
+# 회의 제목
+- 회의 목적을 한 줄로 요약 (예: “RTB 개편 1차 기능 스펙 정리 회의”)
+
+---
+
+## 📝 주요 논의 내용
+- 핵심 논의 내용을 요약하되, 기능/이슈/요구사항 단위로 구조화
+- 필요 시 bullet 하위 depth 사용
+
+---
+
+## 📌 결정된 사항(Decision)
+- 최종 합의된 내용만 명확하게 정리
+- 없으면 “해당 없음” 명시
+
+---
+
+## ❗ 해결해야 할 이슈
+- 논의 중 남은 문제, 리스크, 미해결 이슈
+- 담당자 @이름 포함 가능하면 포함
+
+---
+
+## 📅 Action Items (할 일)
+다음 형식을 유지:
+- [ ] @담당자 – 해야 할 일 (예정 기한이 언급되면 추가)
+
+예:
+- [ ] @최영기 – 개편 API 스키마 정리 (내일 오전까지)
+- [ ] @홍채민 – UI 개선안 v2 정리
+
+---
+
+## 🗂 참고 메모
+- 필요한 경우만 정리
+- STT에서 “중요하지 않은 잡담/중복 발언”은 제거
+-----------------------------------
+
+다음은 STT로 변환된 회의 전체 내용입니다.
+
+[회의 원문 시작]
+\(transcript)
+[회의 원문 끝]
+
+위 규칙에 따라 정제된 노션용 회의록을 작성해주세요.
+"""
+
+        let payload: [String: Any] = [
+            "model": model,
+            "max_tokens": 1200,
+            "temperature": 0.2,
+            "system": systemPrompt,
+            "messages": [
+                [
+                    "role": "user",
+                    "content": [
+                        ["type": "text", "text": userPrompt]
+                    ]
+                ]
+            ]
+        ]
+
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 900
         config.timeoutIntervalForResource = 900
         let session = URLSession(configuration: config)
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(anthropicKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.timeoutInterval = 900
-        
-        // ✅ Anthropic 키를 token 필드로 함께 전달
-        let anthropicKey = SettingsManager.shared.anthropicKey
-        let payload: [String: Any] = [
-            "transcript": transcript,
-            "token": anthropicKey
-        ]
-        
+
         do {
-            let data = try JSONSerialization.data(withJSONObject: payload, options: [])
-            request.httpBody = data
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
         } catch {
-            DispatchQueue.main.async {
-                self.isUploading = false
-                self.errorMessage = "요청 JSON 생성 실패: \(error.localizedDescription)"
-            }
+            completion(.failure(error))
             return
         }
-        
-        let task = session.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self else { return }
-            
-            if let error = error as NSError? {
-                print("❌ n8n upload error: \(error.domain) \(error.code) \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    self.isUploading = false
-                    self.errorMessage = "업로드 실패: \(error.localizedDescription) (code: \(error.code))"
-                }
+
+        let task = session.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
                 return
             }
-            
+
             guard let httpResponse = response as? HTTPURLResponse else {
-                DispatchQueue.main.async {
-                    self.isUploading = false
-                    self.errorMessage = "잘못된 n8n 응답 형식"
-                }
+                completion(.failure(NSError(domain: "AudioRecorder", code: -31, userInfo: [NSLocalizedDescriptionKey: "잘못된 Claude 응답 형식"])))
                 return
             }
-            
-            print("📡 n8n HTTP status code: \(httpResponse.statusCode)")
-            print("📡 n8n Response headers: \(httpResponse.allHeaderFields)")
-            
+
             guard (200..<300).contains(httpResponse.statusCode) else {
-                DispatchQueue.main.async {
-                    self.isUploading = false
-                    self.errorMessage = "서버 응답 코드: \(httpResponse.statusCode)"
-                }
+                completion(.failure(NSError(domain: "AudioRecorder", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Claude 응답 코드: \(httpResponse.statusCode)"])))
                 return
             }
-            
-            var parsedSummaryURL: URL?
-            if let data = data {
-                if let text = String(data: data, encoding: .utf8) {
-                    print("📩 n8n raw response body:\n\(text)")
-                } else {
-                    print("📩 n8n raw response body length: \(data.count) bytes")
-                }
-                
-                do {
-                    let decoded = try JSONDecoder().decode(N8NSummaryResponse.self, from: data)
-                    if let urlString = decoded.summaryUrl ?? decoded.url,
-                       let url = URL(string: urlString) {
-                        parsedSummaryURL = url
-                    }
-                } catch {
-                    print("⚠️ n8n 응답 JSON 디코딩 실패: \(error.localizedDescription)")
-                }
+
+            guard let data = data else {
+                completion(.failure(NSError(domain: "AudioRecorder", code: -32, userInfo: [NSLocalizedDescriptionKey: "Claude 응답 데이터 없음"])))
+                return
             }
-            
-            DispatchQueue.main.async {
-                self.isUploading = false
-                if let url = parsedSummaryURL {
-                    self.summaryURL = url
-                }
+
+            do {
+                let decoded = try JSONDecoder().decode(AnthropicMessageResponse.self, from: data)
+                let text = decoded.content.compactMap { $0.text }.joined()
+                completion(.success(text))
+            } catch {
+                completion(.failure(error))
             }
         }
-        
+
         task.resume()
+    }
+
+    // MARK: - Notion 페이지 생성
+    private struct NotionPageResponse: Decodable {
+        let url: String
+    }
+
+    private func createNotionPage(summary: String, transcript: String, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let url = URL(string: "https://api.notion.com/v1/pages") else {
+            completion(.failure(NSError(domain: "AudioRecorder", code: -40, userInfo: [NSLocalizedDescriptionKey: "잘못된 Notion API URL"])))
+            return
+        }
+
+        let notionKey = SettingsManager.shared.notionKey
+        let databaseId = "173321af000280d787eae2ffeb63c974"
+
+        let title = buildNotionTitle(from: summary)
+        let children = buildNotionChildren(summary: summary, transcript: transcript)
+
+        let payload: [String: Any] = [
+            "parent": ["database_id": databaseId],
+            "properties": [
+                "이름": [
+                    "title": [
+                        ["type": "text", "text": ["content": title]]
+                    ]
+                ],
+                "키워드": [
+                    "multi_select": [
+                        ["name": "회의록[개발협의]"]
+                    ]
+                ],
+                "상태": [
+                    "status": ["name": "완료"]
+                ]
+            ],
+            "children": children
+        ]
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 900
+        config.timeoutIntervalForResource = 900
+        let session = URLSession(configuration: config)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(notionKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("2022-06-28", forHTTPHeaderField: "Notion-Version")
+        request.timeoutInterval = 900
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            completion(.failure(error))
+            return
+        }
+
+        let task = session.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(.failure(NSError(domain: "AudioRecorder", code: -41, userInfo: [NSLocalizedDescriptionKey: "잘못된 Notion 응답 형식"])))
+                return
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                completion(.failure(NSError(domain: "AudioRecorder", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Notion 응답 코드: \(httpResponse.statusCode)"])))
+                return
+            }
+
+            guard let data = data else {
+                completion(.failure(NSError(domain: "AudioRecorder", code: -42, userInfo: [NSLocalizedDescriptionKey: "Notion 응답 데이터 없음"])))
+                return
+            }
+
+            do {
+                let decoded = try JSONDecoder().decode(NotionPageResponse.self, from: data)
+                completion(.success(decoded.url))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+
+        task.resume()
+    }
+
+    private func buildNotionTitle(from summary: String) -> String {
+        let lines = summary.split(separator: "\n", omittingEmptySubsequences: true)
+        let rawTitle = lines.first(where: { $0.hasPrefix("# ") })?.replacingOccurrences(of: "# ", with: "")
+            ?? "회의록"
+
+        let now = Date()
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "yyMMdd"
+        let datePrefix = formatter.string(from: now)
+
+        return "\(datePrefix) \(rawTitle)"
+    }
+
+    private func buildNotionChildren(summary: String, transcript: String) -> [[String: Any]] {
+        var children: [[String: Any]] = []
+
+        children.append(notionHeading2Block("[회의록 요약]"))
+        chunkText(summary, maxLength: 2000).forEach { chunk in
+            children.append(notionParagraphBlock(chunk))
+        }
+
+        children.append(notionHeading2Block("[원문]"))
+        chunkText(transcript, maxLength: 2000).forEach { chunk in
+            children.append(notionParagraphBlock(chunk))
+        }
+
+        return children
+    }
+
+    private func notionHeading2Block(_ text: String) -> [String: Any] {
+        return [
+            "object": "block",
+            "type": "heading_2",
+            "heading_2": [
+                "rich_text": [
+                    ["type": "text", "text": ["content": text]]
+                ]
+            ]
+        ]
+    }
+
+    private func notionParagraphBlock(_ text: String) -> [String: Any] {
+        return [
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": [
+                "rich_text": [
+                    ["type": "text", "text": ["content": text]]
+                ]
+            ]
+        ]
+    }
+
+    private func chunkText(_ text: String, maxLength: Int) -> [String] {
+        var chunks: [String] = []
+        var start = text.startIndex
+
+        while start < text.endIndex {
+            let endIndex = text.index(start, offsetBy: maxLength, limitedBy: text.endIndex) ?? text.endIndex
+            let slice = String(text[start..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !slice.isEmpty {
+                chunks.append(slice)
+            }
+            start = endIndex
+        }
+
+        return chunks
     }
     
     /// 대용량 오디오 파일을 일정 길이(예: 10분) 단위로 나누어 순차적으로 STT 수행 후 하나의 텍스트로 합칩니다.
@@ -677,4 +926,3 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
 }
-

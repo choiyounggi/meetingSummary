@@ -8,7 +8,8 @@ final class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
     private let openAIKeyKey = "OPEN_AI_KEY"
     private let anthropicKeyKey = "ANTHROPIC_KEY"
-    
+    private let notionKeyKey = "NOTION_API_KEY"
+
     @Published var openAIKey: String = "" {
         didSet {
             UserDefaults.standard.set(openAIKey, forKey: openAIKeyKey)
@@ -19,6 +20,11 @@ final class SettingsManager: ObservableObject {
             UserDefaults.standard.set(anthropicKey, forKey: anthropicKeyKey)
         }
     }
+    @Published var notionKey: String = "" {
+        didSet {
+            UserDefaults.standard.set(notionKey, forKey: notionKeyKey)
+        }
+    }
     
     private init() {
         objectWillChange = ObservableObjectPublisher()
@@ -26,14 +32,17 @@ final class SettingsManager: ObservableObject {
         // 1) UserDefaults에 저장된 값이 있으면 우선 사용
         let savedOpenAI = UserDefaults.standard.string(forKey: openAIKeyKey)
         let savedAnthropic = UserDefaults.standard.string(forKey: anthropicKeyKey)
-        
+        let savedNotion = UserDefaults.standard.string(forKey: notionKeyKey)
+
         // 2) 없으면 환경변수에서 기본값 로드
         let env = ProcessInfo.processInfo.environment
-        let envOpenAI = env["OPEN_AI_KEY"] ?? ""
+        let envOpenAI = env["OPENAI_API_KEY"] ?? ""
         let envAnthropic = env["ANTHROPIC_KEY"] ?? ""
-        
+        let envNotion = env["NOTION_API_KEY"] ?? ""
+
         openAIKey = savedOpenAI?.isEmpty == false ? savedOpenAI! : envOpenAI
         anthropicKey = savedAnthropic?.isEmpty == false ? savedAnthropic! : envAnthropic
+        notionKey = savedNotion?.isEmpty == false ? savedNotion! : envNotion
     }
     
     func masked(_ text: String) -> String {
@@ -45,8 +54,9 @@ final class SettingsManager: ObservableObject {
     }
     
     // 외부에서 환경변수 갱신
-    func save(openAI: String, anthropic: String) {
+    func save(openAI: String, anthropic: String, notion: String) {
         openAIKey = openAI
         anthropicKey = anthropic
+        notionKey = notion
     }
 }

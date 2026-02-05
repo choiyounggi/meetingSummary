@@ -4,6 +4,7 @@ struct SettingsView: View {
     @StateObject private var settings = SettingsManager.shared
     @State private var showOpenAIKey: Bool = false
     @State private var showAnthropicKey: Bool = false
+    @State private var showNotionKey: Bool = false
 
     private let labelWidth: CGFloat = 110
     private let buttonWidth: CGFloat = 68   // "표시"/"숨기기" 여유폭
@@ -72,6 +73,32 @@ struct SettingsView: View {
                     .frame(width: buttonWidth)
                     .buttonStyle(.bordered)
                 }
+
+                // Notion
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Notion 키")
+                        .frame(width: labelWidth, alignment: .leading)
+
+                    if showNotionKey {
+                        TextField("ntn_...", text: $settings.notionKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(minWidth: minFieldWidth, maxWidth: maxFieldWidth)
+                    } else {
+                        SecureField("ntn_...", text: $settings.notionKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(minWidth: minFieldWidth, maxWidth: maxFieldWidth)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Button(showNotionKey ? "숨기기" : "표시") {
+                        showNotionKey.toggle()
+                    }
+                    .frame(width: buttonWidth)
+                    .buttonStyle(.bordered)
+                }
             }
 
             Divider()
@@ -79,7 +106,7 @@ struct SettingsView: View {
             HStack {
                 Spacer()
                 Button("저장") {
-                    settings.save(openAI: settings.openAIKey, anthropic: settings.anthropicKey)
+                    settings.save(openAI: settings.openAIKey, anthropic: settings.anthropicKey, notion: settings.notionKey)
                 }
                 .buttonStyle(.borderedProminent)
             }
