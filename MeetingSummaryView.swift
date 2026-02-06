@@ -113,15 +113,35 @@ struct MeetingSummaryView: View {
 
             // 에러 메시지
             if let error = recorder.errorMessage {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                    Text(error)
-                        .font(.system(size: 11))
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                        Text(error)
+                            .font(.system(size: 11))
+                    }
+                    .foregroundColor(.red)
+
+                    // 마이크 권한 에러일 때 설정 열기 버튼 표시
+                    if error.contains("마이크 권한") {
+                        Button {
+                            recorder.openMicPrivacySettings()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "gear")
+                                    .font(.system(size: 11))
+                                Text("시스템 설정 열기")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                    }
                 }
-                .foregroundColor(.red)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 8)

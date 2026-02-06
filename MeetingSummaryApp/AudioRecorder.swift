@@ -307,7 +307,7 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 DispatchQueue.main.async {
                     if !granted {
 #if os(macOS)
-                        self.errorMessage = "마이크 권한이 거부되었습니다. 시스템 설정 > 개인정보 보호 및 보안 > 마이크에서 이 앱을 허용해주세요. 필요 시 아래 버튼으로 설정을 여세요."
+                        self.errorMessage = "마이크 권한이 거부되었습니다. 시스템 설정에서 이 앱의 마이크 접근을 허용해주세요."
 #else
                         self.errorMessage = "마이크 권한이 거부되었습니다. 설정 > 개인정보 보호 및 보안 > 마이크에서 이 앱을 허용해주세요."
 #endif
@@ -319,7 +319,7 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         case .denied, .restricted:
             DispatchQueue.main.async {
 #if os(macOS)
-                self.errorMessage = "마이크 권한이 꺼져 있습니다. 시스템 설정 > 개인정보 보호 및 보안 > 마이크에서 이 앱을 허용해주세요. 필요 시 아래 버튼으로 설정을 여세요."
+                self.errorMessage = "마이크 권한이 꺼져 있습니다. 시스템 설정에서 이 앱의 마이크 접근을 허용해주세요."
 #else
                 self.errorMessage = "마이크 권한이 꺼져 있습니다. 설정 > 개인정보 보호 및 보안 > 마이크에서 이 앱을 허용해주세요."
 #endif
