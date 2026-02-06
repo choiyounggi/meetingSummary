@@ -85,7 +85,8 @@ struct ContentView: View {
                 .opacity(selectedTab == .settings ? 1 : 0)
             }
         }
-        .frame(width: 480, height: 520)
+        .frame(minWidth: 400, idealWidth: 480, maxWidth: 520,
+               minHeight: 450, idealHeight: 520, maxHeight: 600)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 }

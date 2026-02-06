@@ -104,7 +104,28 @@ struct MeetingSummaryView: View {
                     if recorder.isRecording {
                         StatusBadge(text: "녹음 중", color: .red)
                     } else if recorder.isUploading {
-                        StatusBadge(text: "처리 중...", color: .blue)
+                        HStack(spacing: 12) {
+                            StatusBadge(text: "처리 중...", color: .blue)
+
+                            Button {
+                                recorder.cancelProcessing()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 12))
+                                    Text("취소")
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.red)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     Spacer()
                 }

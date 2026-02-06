@@ -28,7 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.target = self
 
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 300, height: 360)
+        popover.contentSize = NSSize(width: 480, height: 520)
         popover.contentViewController = NSHostingController(rootView: ContentView())
     }
 
