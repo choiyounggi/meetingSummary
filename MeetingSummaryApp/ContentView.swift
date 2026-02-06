@@ -23,6 +23,7 @@ enum MainTab: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @State private var selectedTab: MainTab = .meeting
+    @StateObject private var recorder = AudioRecorder()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -69,16 +70,19 @@ struct ContentView: View {
             Divider()
                 .padding(.top, 2)
 
-            // 탭에 따른 콘텐츠
-            ScrollView {
-                switch selectedTab {
-                case .meeting:
-                    MeetingSummaryView()
+            // 탭에 따른 콘텐츠 (ZStack + opacity로 뷰 상태 유지)
+            ZStack {
+                ScrollView {
+                    MeetingSummaryView(recorder: recorder)
                         .padding(.top, 4)
-                case .settings:
+                }
+                .opacity(selectedTab == .meeting ? 1 : 0)
+
+                ScrollView {
                     SettingsView()
                         .padding(.top, 4)
                 }
+                .opacity(selectedTab == .settings ? 1 : 0)
             }
         }
         .frame(width: 480, height: 520)

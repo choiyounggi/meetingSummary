@@ -89,7 +89,7 @@ struct StatusBadge: View {
 
 // MARK: - 메인 뷰
 struct MeetingSummaryView: View {
-    @StateObject private var recorder = AudioRecorder()
+    @ObservedObject var recorder: AudioRecorder
     @State private var isDroppingFile: Bool = false
     @State private var isRecordingExpanded: Bool = true
     @State private var isPlaybackExpanded: Bool = true
