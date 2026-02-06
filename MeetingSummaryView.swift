@@ -290,11 +290,66 @@ struct MeetingSummaryView: View {
                         .padding(.vertical, 4)
                     }
                 } else if recorder.isUploading {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("요약 및 Notion 등록 중...")
-                            .font(.system(size: 12))
+                    VStack(spacing: 10) {
+                        // 프로그레스바
+                        ProgressView(value: recorder.processingStage.progress)
+                            .progressViewStyle(.linear)
+                            .tint(.blue)
+
+                        // 단계 표시
+                        HStack(spacing: 0) {
+                            ForEach([ProcessingStage.transcribing, .summarizing, .uploading], id: \.rawValue) { stage in
+                                VStack(spacing: 4) {
+                                    Circle()
+                                        .fill(recorder.processingStage.rawValue >= stage.rawValue ? Color.blue : Color.gray.opacity(0.3))
+                                        .frame(width: 8, height: 8)
+                                    Text(stageLabel(stage))
+                                        .font(.system(size: 10))
+                                        .foregroundColor(recorder.processingStage.rawValue >= stage.rawValue ? .primary : .secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                        }
+
+                        // 현재 상태 텍스트 + 취소 버튼
+                        HStack {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(recorder.processingStage.description)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Button {
+                                recorder.cancelProcessing()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 11))
+                                    Text("취소")
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .foregroundColor(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } else if recorder.processingStage == .completed {
+                    VStack(spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.green)
+                            Text("처리 완료!")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.green)
+                        }
+                        Text("Notion 링크가 곧 표시됩니다")
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -364,5 +419,14 @@ struct MeetingSummaryView: View {
         let m = total / 60
         let s = total % 60
         return String(format: "%02d:%02d", m, s)
+    }
+
+    private func stageLabel(_ stage: ProcessingStage) -> String {
+        switch stage {
+        case .transcribing: return "STT"
+        case .summarizing: return "요약"
+        case .uploading: return "등록"
+        default: return ""
+        }
     }
 }

@@ -14,12 +14,42 @@ import SwiftUI
 import AppKit
 #endif
 
+// MARK: - 처리 단계 enum
+enum ProcessingStage: Int, CaseIterable {
+    case idle = 0
+    case transcribing = 1    // STT 변환 중
+    case summarizing = 2     // 요약 중
+    case uploading = 3       // Notion 등록 중
+    case completed = 4       // 완료
+
+    var description: String {
+        switch self {
+        case .idle: return ""
+        case .transcribing: return "음성을 텍스트로 변환 중..."
+        case .summarizing: return "회의 내용 요약 중..."
+        case .uploading: return "Notion에 등록 중..."
+        case .completed: return "완료"
+        }
+    }
+
+    var progress: Double {
+        switch self {
+        case .idle: return 0.0
+        case .transcribing: return 0.33
+        case .summarizing: return 0.66
+        case .uploading: return 0.9
+        case .completed: return 1.0
+        }
+    }
+}
+
 class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     // MARK: - Recording 상태
     @Published var isRecording: Bool = false
     @Published var currentLevel: CGFloat = 0.0      // 파동 0.0 ~ 1.0
     @Published var isUploading: Bool = false
+    @Published var processingStage: ProcessingStage = .idle
     @Published var transcriptText: String?
     @Published var summaryText: String?
     @Published var notionPageURL: String?
@@ -37,7 +67,23 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var meterTimer: Timer?
     private var playbackTimer: Timer?
     private var recordedFileURL: URL?
-    
+    private var currentTask: URLSessionTask?
+    private var isCancelled: Bool = false
+
+    // MARK: - Public API (취소)
+
+    func cancelProcessing() {
+        isCancelled = true
+        currentTask?.cancel()
+        currentTask = nil
+
+        DispatchQueue.main.async {
+            self.isUploading = false
+            self.processingStage = .idle
+            self.errorMessage = "처리가 취소되었습니다."
+        }
+    }
+
     // MARK: - Public API (녹음)
 
     func startRecording() {
@@ -51,6 +97,7 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
             self.summaryText = nil
             self.notionPageURL = nil
             self.errorMessage = nil
+            self.processingStage = .idle
             self.stopPlaybackIfNeeded()
             self.hasRecording = false
             self.playbackDuration = 0
@@ -322,6 +369,8 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private func uploadAudio(fileURL: URL) {
         isUploading = true
+        isCancelled = false
+        processingStage = .transcribing
         errorMessage = nil
         transcriptText = nil
         summaryText = nil
@@ -348,6 +397,7 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 case .failure(let error):
                     DispatchQueue.main.async {
                         self.isUploading = false
+                        self.processingStage = .idle
                         self.errorMessage = "STT 실패(대용량): \(error.localizedDescription)"
                     }
                 case .success(let transcript):
@@ -362,6 +412,7 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
             } catch {
                 DispatchQueue.main.async {
                     self.isUploading = false
+                    self.processingStage = .idle
                     self.errorMessage = "녹음 파일 읽기 실패: \(error.localizedDescription)"
                 }
                 return
@@ -376,6 +427,7 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 case .failure(let error):
                     DispatchQueue.main.async {
                         self.isUploading = false
+                        self.processingStage = .idle
                         self.errorMessage = "STT 실패: \(error.localizedDescription)"
                     }
                 case .success(let transcript):
@@ -389,6 +441,7 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private func handleTranscript(_ transcript: String) {
         DispatchQueue.main.async {
             self.transcriptText = transcript
+            self.processingStage = .summarizing
         }
         summarizeWithClaude(transcript: transcript) { [weak self] result in
             guard let self = self else { return }
@@ -396,21 +449,25 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
             case .failure(let error):
                 DispatchQueue.main.async {
                     self.isUploading = false
+                    self.processingStage = .idle
                     self.errorMessage = "요약 실패: \(error.localizedDescription)"
                 }
             case .success(let summary):
                 DispatchQueue.main.async {
                     self.summaryText = summary
+                    self.processingStage = .uploading
                 }
                 self.createNotionPage(summary: summary, transcript: transcript) { notionResult in
                     DispatchQueue.main.async {
                         self.isUploading = false
                         switch notionResult {
                         case .success(let pageURL):
+                            self.processingStage = .completed
                             self.notionPageURL = pageURL
                             let title = self.buildNotionTitle(from: summary)
                             self.sendSlackNotification(title: title, notionURL: pageURL)
                         case .failure(let error):
+                            self.processingStage = .idle
                             self.errorMessage = "Notion 등록 실패: \(error.localizedDescription)"
                         }
                     }
@@ -470,11 +527,14 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         // end
         body.append("--\(boundary)--\(lineBreak)".data(using: .utf8)!)
         
-        let task = session.uploadTask(with: request, from: body) { data, response, error in
+        let task = session.uploadTask(with: request, from: body) { [weak self] data, response, error in
             if let error = error {
+                // 취소된 경우 에러 무시
+                if (error as NSError).code == NSURLErrorCancelled { return }
                 completion(.failure(error))
                 return
             }
+            guard self?.isCancelled != true else { return }
             
             guard let httpResponse = response as? HTTPURLResponse else {
                 completion(.failure(NSError(domain: "AudioRecorder", code: -2, userInfo: [NSLocalizedDescriptionKey: "잘못된 OpenAI 응답 형식"])))
@@ -503,10 +563,11 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 completion(.failure(error))
             }
         }
-        
+
+        currentTask = task
         task.resume()
     }
-    
+
     // MARK: - Anthropic Claude 요약
     private struct AnthropicMessageResponse: Decodable {
         struct ContentBlock: Decodable {
@@ -638,11 +699,13 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
             return
         }
 
-        let task = session.dataTask(with: request) { data, response, error in
+        let task = session.dataTask(with: request) { [weak self] data, response, error in
             if let error = error {
+                if (error as NSError).code == NSURLErrorCancelled { return }
                 completion(.failure(error))
                 return
             }
+            guard self?.isCancelled != true else { return }
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 completion(.failure(NSError(domain: "AudioRecorder", code: -31, userInfo: [NSLocalizedDescriptionKey: "잘못된 Claude 응답 형식"])))
@@ -668,6 +731,7 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
             }
         }
 
+        currentTask = task
         task.resume()
     }
 
@@ -727,11 +791,13 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
             return
         }
 
-        let task = session.dataTask(with: request) { data, response, error in
+        let task = session.dataTask(with: request) { [weak self] data, response, error in
             if let error = error {
+                if (error as NSError).code == NSURLErrorCancelled { return }
                 completion(.failure(error))
                 return
             }
+            guard self?.isCancelled != true else { return }
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 completion(.failure(NSError(domain: "AudioRecorder", code: -41, userInfo: [NSLocalizedDescriptionKey: "잘못된 Notion 응답 형식"])))
@@ -756,6 +822,7 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
             }
         }
 
+        currentTask = task
         task.resume()
     }
 
