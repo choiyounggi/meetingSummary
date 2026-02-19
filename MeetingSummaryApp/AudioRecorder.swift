@@ -587,32 +587,10 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let anthropicKey = SettingsManager.shared.anthropicKey
         let model = "claude-sonnet-4-20250514"
 
-        let systemPrompt = """
-당신은 알스퀘어(RSquare) RTB 개발팀의 회의록 전문 정리자입니다.
-
-## 회사·서비스 배경
-- 알스퀘어: 국내 대표 상업용 부동산 종합 서비스 기업
-- RTB(RSquare To-Be): 상업용 부동산 중개 플랫폼. 오피스·리테일·물류/산업 부동산의 매물 관리, 거래 추적, 고객 관리를 담당
-- 레거시 RTB 전면 개편 프로젝트 진행 중 (2026년 말 출시 예정 Nest, Nuxt 기반)
-- 백엔드: Kotlin/Spring Boot, PostgreSQL, AWS(EKS)
-- 프론트엔드: React/TypeScript
-- 환경: INT(개발), STG(스테이징), PRD(운영)
-
-## 도메인 핵심 용어
-STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 보정하세요:
-- Building(건물) → Unit(호실) → Product(매물) → Deal(딜/거래): 핵심 엔티티 계층 구조
-- Client(거래처): 임대인/매도인 (매물 제공자)
-- Customer(고객): 임차인/매수인 (매물 수요자)
-- PNU: 필지고유번호
-- 알스퀘어온(rsquareon): 서비스 도메인
-- 딜 플로우: 상담 → 투어 → 협상 → 계약
-- 테이블 prefix: obj_(객체), prd_(상품), mbr_(멤버), gtd_(거래), cmm_(공통), sys_(시스템)
-- QueryPie: 운영 DB 접근 도구
-
-## 팀원 (이름 언급 시 반드시 @성+이름으로 표기)
-- 개발자: @박상용(팀장), @복영균(이사), @양준철(TL), @이종호, @홍채민, @최영기, @조재용, @김민정
-- PM(기획): @이미정, @최병선, @서연정
-"""
+        // 위키 컨텍스트 로드 → 성공 시 위키 기반 프롬프트, 실패 시 기존 하드코딩 프롬프트
+        let wikiPath = SettingsManager.shared.wikiPath
+        let wikiContext = WikiContextLoader.shared.loadContext(from: wikiPath)
+        let systemPrompt = WikiContextLoader.shared.buildSystemPrompt(wikiContext: wikiContext)
 
         let userPrompt = """
 아래 STT 자동 변환 텍스트를 정제된 회의록으로 재구성해주세요.
@@ -667,7 +645,7 @@ STT에서 아래 용어가 다르게 인식될 수 있으니 문맥에 맞게 �
 
         let payload: [String: Any] = [
             "model": model,
-            "max_tokens": 2500,
+            "max_tokens": 4000,
             "temperature": 0.2,
             "system": systemPrompt,
             "messages": [

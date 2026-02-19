@@ -10,6 +10,7 @@
 		5C95C9812EEBDDCE007A8F16 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C95C9802EEBDDCE007A8F16 /* SettingsManager.swift */; };
 		5C95C9832EEBDED7007A8F16 /* MeetingSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C95C9822EEBDED7007A8F16 /* MeetingSummaryView.swift */; };
 		5C95C9852EEBDEDB007A8F16 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C95C9842EEBDEDB007A8F16 /* SettingsView.swift */; };
+		5C95C9872EEBDEDF007A8F16 /* WikiContextLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C95C9862EEBDEDF007A8F16 /* WikiContextLoader.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -17,6 +18,7 @@
 		5C95C9802EEBDDCE007A8F16 /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
 		5C95C9822EEBDED7007A8F16 /* MeetingSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingSummaryView.swift; sourceTree = "<group>"; };
 		5C95C9842EEBDEDB007A8F16 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		5C95C9862EEBDEDF007A8F16 /* WikiContextLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiContextLoader.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -42,6 +44,7 @@
 				5C95C9802EEBDDCE007A8F16 /* SettingsManager.swift */,
 				5C95C9822EEBDED7007A8F16 /* MeetingSummaryView.swift */,
 				5C95C9842EEBDEDB007A8F16 /* SettingsView.swift */,
+				5C95C9862EEBDEDF007A8F16 /* WikiContextLoader.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -130,6 +133,7 @@
 				5C95C9852EEBDEDB007A8F16 /* SettingsView.swift in Sources */,
 				5C95C9812EEBDDCE007A8F16 /* SettingsManager.swift in Sources */,
 				5C95C9832EEBDED7007A8F16 /* MeetingSummaryView.swift in Sources */,
+				5C95C9872EEBDEDF007A8F16 /* WikiContextLoader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

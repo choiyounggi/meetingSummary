@@ -9,6 +9,8 @@ final class SettingsManager: ObservableObject {
     private let openAIKeyKey = "OPEN_AI_KEY"
     private let anthropicKeyKey = "ANTHROPIC_KEY"
     private let notionKeyKey = "NOTION_API_KEY"
+    private let wikiPathKey = "WIKI_PATH"
+    private let wikiBookmarkKey = "WIKI_BOOKMARK"
 
     @Published var openAIKey: String = "" {
         didSet {
@@ -23,6 +25,11 @@ final class SettingsManager: ObservableObject {
     @Published var notionKey: String = "" {
         didSet {
             UserDefaults.standard.set(notionKey, forKey: notionKeyKey)
+        }
+    }
+    @Published var wikiPath: String = "" {
+        didSet {
+            UserDefaults.standard.set(wikiPath, forKey: wikiPathKey)
         }
     }
     
@@ -40,9 +47,12 @@ final class SettingsManager: ObservableObject {
         let envAnthropic = env["ANTHROPIC_KEY"] ?? ""
         let envNotion = env["NOTION_API_KEY"] ?? ""
 
+        let savedWikiPath = UserDefaults.standard.string(forKey: wikiPathKey)
+
         openAIKey = savedOpenAI?.isEmpty == false ? savedOpenAI! : envOpenAI
         anthropicKey = savedAnthropic?.isEmpty == false ? savedAnthropic! : envAnthropic
         notionKey = savedNotion?.isEmpty == false ? savedNotion! : envNotion
+        wikiPath = savedWikiPath ?? ""
     }
     
     func masked(_ text: String) -> String {
@@ -53,6 +63,44 @@ final class SettingsManager: ObservableObject {
         return mask + suffix
     }
     
+    // MARK: - 위키 경로 북마크 (샌드박스 환경에서 재시작 후에도 접근 가능)
+
+    func saveWikiBookmark(for url: URL) {
+        do {
+            let bookmarkData = try url.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            UserDefaults.standard.set(bookmarkData, forKey: wikiBookmarkKey)
+            wikiPath = url.path
+        } catch {
+            print("⚠️ 위키 북마크 저장 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func resolveWikiBookmark() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: wikiBookmarkKey) else {
+            return nil
+        }
+        do {
+            var isStale = false
+            let url = try URL(
+                resolvingBookmarkData: data,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            if isStale {
+                saveWikiBookmark(for: url)
+            }
+            return url
+        } catch {
+            print("⚠️ 위키 북마크 복원 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // 외부에서 환경변수 갱신
     func save(openAI: String, anthropic: String, notion: String) {
         openAIKey = openAI
