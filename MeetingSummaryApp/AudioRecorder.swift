@@ -1121,70 +1121,181 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }.resume()
     }
 
-    /// 대용량 오디오 파일을 일정 길이(예: 10분) 단위로 나누어 순차적으로 STT 수행 후 하나의 텍스트로 합칩니다.
+    private let maxRetryCount = 2
+
+    /// 대용량 오디오 파일을 청크로 나누어 병렬 STT 수행 후 하나의 텍스트로 합칩니다.
+    /// 각 청크는 실패 시 최대 maxRetryCount회 재시도하며, 재시도 후에도 실패하면 전체 실패 처리합니다.
     private func transcribeLargeAudio(fileURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
         let asset = AVURLAsset(url: fileURL)
         let durationSeconds = CMTimeGetSeconds(asset.duration)
-        
+
         guard durationSeconds.isFinite && durationSeconds > 0 else {
             completion(.failure(NSError(domain: "AudioRecorder",
                                         code: -20,
                                         userInfo: [NSLocalizedDescriptionKey: "오디오 duration 정보를 가져오지 못했습니다."])))
             return
         }
-        
+
         let chunkDuration: Double = 600.0
         let chunkCount = max(1, Int(ceil(durationSeconds / chunkDuration)))
-        
-        print("🔪 Splitting audio into \(chunkCount) chunks (duration: \(durationSeconds) seconds)")
-        
-        var transcripts: [String] = Array(repeating: "", count: chunkCount)
-        var currentIndex = 0
-        
-        func processNextChunk() {
-            if currentIndex >= chunkCount {
-                let merged = transcripts.joined(separator: " ")
-                completion(.success(merged))
-                return
-            }
-            
-            let startTime = Double(currentIndex) * chunkDuration
+
+        print("🔪 Splitting audio into \(chunkCount) chunks (duration: \(durationSeconds) seconds), parallel processing")
+
+        // 1) 모든 청크를 먼저 내보내기
+        let exportGroup = DispatchGroup()
+        var chunkURLs: [Int: URL] = [:]
+        var exportError: Error?
+        let lock = NSLock()
+
+        for i in 0..<chunkCount {
+            exportGroup.enter()
+            let startTime = Double(i) * chunkDuration
             let remaining = durationSeconds - startTime
             let thisDuration = min(chunkDuration, remaining)
-            
-            print("🔪 Exporting chunk \(currentIndex + 1)/\(chunkCount) [start=\(startTime), duration=\(thisDuration)]")
-            
-            exportAudioChunk(asset: asset, startTime: startTime, duration: thisDuration) { [weak self] exportResult in
-                guard let self = self else { return }
-                
-                switch exportResult {
+
+            print("🔪 Exporting chunk \(i + 1)/\(chunkCount) [start=\(startTime), duration=\(thisDuration)]")
+
+            exportAudioChunk(asset: asset, startTime: startTime, duration: thisDuration) { result in
+                lock.lock()
+                switch result {
+                case .success(let url):
+                    chunkURLs[i] = url
                 case .failure(let error):
-                    completion(.failure(error))
-                case .success(let chunkURL):
-                    do {
-                        let chunkData = try Data(contentsOf: chunkURL)
-                        let chunkFileName = "chunk-\(currentIndex)-\(fileURL.lastPathComponent)"
-                        
-                        self.transcribeWithOpenAI(audioData: chunkData, fileName: chunkFileName) { sttResult in
-                            try? FileManager.default.removeItem(at: chunkURL)
-                            
-                            switch sttResult {
-                            case .failure(let error):
-                                completion(.failure(error))
-                            case .success(let text):
-                                transcripts[currentIndex] = text
-                                currentIndex += 1
-                                processNextChunk()
-                            }
-                        }
-                    } catch {
-                        completion(.failure(error))
+                    if exportError == nil { exportError = error }
+                }
+                lock.unlock()
+                exportGroup.leave()
+            }
+        }
+
+        exportGroup.notify(queue: .global(qos: .userInitiated)) { [weak self] in
+            guard let self = self else { return }
+            guard self.isCancelled != true else { return }
+
+            if let error = exportError {
+                // 내보내기 실패한 청크 임시 파일 정리
+                lock.lock()
+                let urls = Array(chunkURLs.values)
+                lock.unlock()
+                urls.forEach { try? FileManager.default.removeItem(at: $0) }
+                completion(.failure(error))
+                return
+            }
+
+            // 2) 병렬 STT 처리 (재시도 포함)
+            self.transcribeChunksInParallel(
+                chunkURLs: chunkURLs,
+                chunkCount: chunkCount,
+                originalFileName: fileURL.lastPathComponent,
+                completion: completion
+            )
+        }
+    }
+
+    /// 내보내기 완료된 청크들을 병렬로 STT 처리합니다. 실패 시 재시도합니다.
+    private func transcribeChunksInParallel(
+        chunkURLs: [Int: URL],
+        chunkCount: Int,
+        originalFileName: String,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        let sttGroup = DispatchGroup()
+        var transcripts: [Int: String] = [:]
+        var failedChunks: [Int: Error] = [:]
+        let lock = NSLock()
+
+        for i in 0..<chunkCount {
+            guard let chunkURL = chunkURLs[i] else { continue }
+            sttGroup.enter()
+
+            transcribeChunkWithRetry(chunkURL: chunkURL, index: i, originalFileName: originalFileName, retryCount: 0) { result in
+                lock.lock()
+                switch result {
+                case .success(let text):
+                    transcripts[i] = text
+                case .failure(let error):
+                    failedChunks[i] = error
+                }
+                lock.unlock()
+                sttGroup.leave()
+            }
+        }
+
+        sttGroup.notify(queue: .global(qos: .userInitiated)) {
+            // 임시 파일 정리
+            for url in chunkURLs.values {
+                try? FileManager.default.removeItem(at: url)
+            }
+
+            lock.lock()
+            let failed = failedChunks
+            let results = transcripts
+            lock.unlock()
+
+            if !failed.isEmpty {
+                let failedIndices = failed.keys.sorted().map { "\($0 + 1)" }.joined(separator: ", ")
+                let firstError = failed.values.first!
+                completion(.failure(NSError(
+                    domain: "AudioRecorder",
+                    code: -23,
+                    userInfo: [NSLocalizedDescriptionKey: "STT 실패 (청크 \(failedIndices)): \(firstError.localizedDescription)"]
+                )))
+                return
+            }
+
+            let merged = (0..<chunkCount).compactMap { results[$0] }.joined(separator: " ")
+            print("📝 STT 병렬 처리 완료 (총 \(chunkCount)개 청크, \(merged.count)자)")
+            completion(.success(merged))
+        }
+    }
+
+    /// 단일 청크 STT를 수행하고, 실패 시 maxRetryCount회까지 재시도합니다.
+    private func transcribeChunkWithRetry(
+        chunkURL: URL,
+        index: Int,
+        originalFileName: String,
+        retryCount: Int,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        guard isCancelled != true else { return }
+
+        let chunkData: Data
+        do {
+            chunkData = try Data(contentsOf: chunkURL)
+        } catch {
+            completion(.failure(error))
+            return
+        }
+
+        let chunkFileName = "chunk-\(index)-\(originalFileName)"
+        print("🎙 STT 청크 \(index + 1) 처리 중 (시도 \(retryCount + 1)/\(maxRetryCount + 1))")
+
+        transcribeWithOpenAI(audioData: chunkData, fileName: chunkFileName) { [weak self] result in
+            guard let self = self else { return }
+
+            switch result {
+            case .success(let text):
+                print("✅ STT 청크 \(index + 1) 완료 (\(text.count)자)")
+                completion(.success(text))
+            case .failure(let error):
+                if retryCount < self.maxRetryCount {
+                    let delay = Double(retryCount + 1) * 2.0
+                    print("⚠️ STT 청크 \(index + 1) 실패, \(delay)초 후 재시도 (\(retryCount + 1)/\(self.maxRetryCount))")
+                    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) {
+                        self.transcribeChunkWithRetry(
+                            chunkURL: chunkURL,
+                            index: index,
+                            originalFileName: originalFileName,
+                            retryCount: retryCount + 1,
+                            completion: completion
+                        )
                     }
+                } else {
+                    print("❌ STT 청크 \(index + 1) 최종 실패: \(error.localizedDescription)")
+                    completion(.failure(error))
                 }
             }
         }
-        
-        processNextChunk()
     }
 
     private func exportAudioChunk(asset: AVAsset,
