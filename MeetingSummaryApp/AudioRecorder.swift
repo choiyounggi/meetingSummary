@@ -17,14 +17,16 @@ import AppKit
 // MARK: - 처리 단계 enum
 enum ProcessingStage: Int, CaseIterable {
     case idle = 0
-    case transcribing = 1    // STT 변환 중
-    case summarizing = 2     // 요약 중
-    case uploading = 3       // Notion 등록 중
-    case completed = 4       // 완료
+    case validating = 1      // API 토큰 검증 중
+    case transcribing = 2    // STT 변환 중
+    case summarizing = 3     // 요약 중
+    case uploading = 4       // Notion 등록 중
+    case completed = 5       // 완료
 
     var description: String {
         switch self {
         case .idle: return ""
+        case .validating: return "API 토큰 검증 중..."
         case .transcribing: return "음성을 텍스트로 변환 중..."
         case .summarizing: return "회의 내용 요약 중..."
         case .uploading: return "Notion에 등록 중..."
@@ -35,9 +37,10 @@ enum ProcessingStage: Int, CaseIterable {
     var progress: Double {
         switch self {
         case .idle: return 0.0
-        case .transcribing: return 0.33
-        case .summarizing: return 0.66
-        case .uploading: return 0.9
+        case .validating: return 0.05
+        case .transcribing: return 0.30
+        case .summarizing: return 0.60
+        case .uploading: return 0.85
         case .completed: return 1.0
         }
     }
@@ -87,46 +90,69 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
     // MARK: - Public API (녹음)
 
     func startRecording() {
-        // 1) 먼저 마이크 권한 체크
-        checkMicPermission { [weak self] granted in
-            guard let self = self, granted else { return }
+        // 1) 상태 초기화
+        transcriptText = nil
+        summaryText = nil
+        notionPageURL = nil
+        errorMessage = nil
+        processingStage = .validating
+        isUploading = true
 
-            // 2) 권한이 허용된 경우에만 실제 녹음 시작 로직 수행
-            // 업로드/재생 관련 상태 초기화
-            self.transcriptText = nil
-            self.summaryText = nil
-            self.notionPageURL = nil
-            self.errorMessage = nil
-            self.processingStage = .idle
-            self.stopPlaybackIfNeeded()
-            self.hasRecording = false
-            self.playbackDuration = 0
-            self.playbackCurrentTime = 0
+        // 2) 토큰 검증 먼저 수행
+        validateAllTokens { [weak self] result in
+            guard let self = self else { return }
 
-            let fileName = "meeting-\(UUID().uuidString).m4a"
-            let tempDir = FileManager.default.temporaryDirectory
-            let fileURL = tempDir.appendingPathComponent(fileName)
-            self.recordedFileURL = fileURL
-
-            let settings: [String: Any] = [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 44100,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-            ]
-
-            do {
-                self.audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
-                self.audioRecorder?.isMeteringEnabled = true
-                self.audioRecorder?.prepareToRecord()
-                self.audioRecorder?.record()
-
-                self.isRecording = true
-                self.startMetering()
-            } catch {
-                self.errorMessage = "녹음 시작 실패: \(error.localizedDescription)"
-                self.isRecording = false
+            switch result {
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    self.isUploading = false
+                    self.processingStage = .idle
+                    self.errorMessage = error.localizedDescription
+                }
+            case .success:
+                DispatchQueue.main.async {
+                    self.isUploading = false
+                    self.processingStage = .idle
+                }
+                // 3) 검증 통과 후 마이크 권한 체크 → 녹음 시작
+                self.checkMicPermission { [weak self] granted in
+                    guard let self = self, granted else { return }
+                    self.beginRecording()
+                }
             }
+        }
+    }
+
+    /// 검증/권한 체크 완료 후 실제 녹음을 시작합니다.
+    private func beginRecording() {
+        stopPlaybackIfNeeded()
+        hasRecording = false
+        playbackDuration = 0
+        playbackCurrentTime = 0
+
+        let fileName = "meeting-\(UUID().uuidString).m4a"
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent(fileName)
+        recordedFileURL = fileURL
+
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+
+        do {
+            audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
+            audioRecorder?.isMeteringEnabled = true
+            audioRecorder?.prepareToRecord()
+            audioRecorder?.record()
+
+            isRecording = true
+            startMetering()
+        } catch {
+            errorMessage = "녹음 시작 실패: \(error.localizedDescription)"
+            isRecording = false
         }
     }
 
@@ -348,6 +374,12 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         isPlaying = false
 
         recordedFileURL = url
+        transcriptText = nil
+        summaryText = nil
+        notionPageURL = nil
+        errorMessage = nil
+        processingStage = .validating
+        isUploading = true
 
         do {
             let player = try AVAudioPlayer(contentsOf: url)
@@ -362,20 +394,216 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
         }
 
-        uploadAudio(fileURL: url)
+        // 토큰 검증 후 업로드 진행
+        validateAllTokens { [weak self] result in
+            guard let self = self else { return }
+
+            switch result {
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    self.isUploading = false
+                    self.processingStage = .idle
+                    self.errorMessage = error.localizedDescription
+                }
+            case .success:
+                self.uploadAudio(fileURL: url)
+            }
+        }
     }
     
+    // MARK: - API 토큰 검증
+
+    /// 모든 필수 API 토큰의 존재 여부와 유효성을 병렬로 검증합니다.
+    private func validateAllTokens(completion: @escaping (Result<Void, Error>) -> Void) {
+        let settings = SettingsManager.shared
+
+        // 1) 토큰 존재 여부 먼저 확인
+        var missingKeys: [String] = []
+        if settings.openAIKey.isEmpty { missingKeys.append("OpenAI") }
+        if settings.anthropicKey.isEmpty { missingKeys.append("Anthropic") }
+        if settings.notionKey.isEmpty { missingKeys.append("Notion") }
+        if settings.githubToken.isEmpty { missingKeys.append("GitHub") }
+
+        if !missingKeys.isEmpty {
+            let msg = "다음 API 키가 설정되지 않았습니다: \(missingKeys.joined(separator: ", "))\n설정 탭에서 입력해주세요."
+            completion(.failure(NSError(domain: "AudioRecorder", code: -50, userInfo: [NSLocalizedDescriptionKey: msg])))
+            return
+        }
+
+        // 2) 유효성 병렬 검증
+        let group = DispatchGroup()
+        var errors: [String] = []
+        let lock = NSLock()
+
+        // OpenAI
+        group.enter()
+        validateOpenAIToken(settings.openAIKey) { valid in
+            if !valid {
+                lock.lock()
+                errors.append("OpenAI")
+                lock.unlock()
+            }
+            group.leave()
+        }
+
+        // Anthropic
+        group.enter()
+        validateAnthropicToken(settings.anthropicKey) { valid in
+            if !valid {
+                lock.lock()
+                errors.append("Anthropic")
+                lock.unlock()
+            }
+            group.leave()
+        }
+
+        // Notion
+        group.enter()
+        validateNotionToken(settings.notionKey) { valid in
+            if !valid {
+                lock.lock()
+                errors.append("Notion")
+                lock.unlock()
+            }
+            group.leave()
+        }
+
+        // GitHub
+        group.enter()
+        validateGitHubToken(settings.githubToken) { valid in
+            if !valid {
+                lock.lock()
+                errors.append("GitHub")
+                lock.unlock()
+            }
+            group.leave()
+        }
+
+        group.notify(queue: .global(qos: .userInitiated)) {
+            lock.lock()
+            let failedKeys = errors
+            lock.unlock()
+
+            if failedKeys.isEmpty {
+                print("✅ 모든 API 토큰 검증 완료")
+                completion(.success(()))
+            } else {
+                let msg = "다음 API 키가 유효하지 않습니다: \(failedKeys.joined(separator: ", "))\n설정 탭에서 올바른 키를 입력해주세요."
+                completion(.failure(NSError(domain: "AudioRecorder", code: -51, userInfo: [NSLocalizedDescriptionKey: msg])))
+            }
+        }
+    }
+
+    private func validateOpenAIToken(_ token: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "https://api.openai.com/v1/models") else {
+            completion(false)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 10
+
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            guard error == nil, let http = response as? HTTPURLResponse else {
+                completion(false)
+                return
+            }
+            let valid = (200..<300).contains(http.statusCode)
+            print(valid ? "✅ OpenAI 토큰 유효" : "❌ OpenAI 토큰 무효 (HTTP \(http.statusCode))")
+            completion(valid)
+        }.resume()
+    }
+
+    private func validateAnthropicToken(_ token: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+            completion(false)
+            return
+        }
+        // 최소 요청으로 토큰 유효성만 확인 (max_tokens=1)
+        let payload: [String: Any] = [
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 1,
+            "messages": [["role": "user", "content": "hi"]]
+        ]
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(token, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.timeoutInterval = 10
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            guard error == nil, let http = response as? HTTPURLResponse else {
+                completion(false)
+                return
+            }
+            // 200 = 정상 응답, 401/403 = 토큰 무효
+            let valid = (200..<300).contains(http.statusCode)
+            print(valid ? "✅ Anthropic 토큰 유효" : "❌ Anthropic 토큰 무효 (HTTP \(http.statusCode))")
+            completion(valid)
+        }.resume()
+    }
+
+    private func validateNotionToken(_ token: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "https://api.notion.com/v1/users/me") else {
+            completion(false)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("2022-06-28", forHTTPHeaderField: "Notion-Version")
+        request.timeoutInterval = 10
+
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            guard error == nil, let http = response as? HTTPURLResponse else {
+                completion(false)
+                return
+            }
+            let valid = (200..<300).contains(http.statusCode)
+            print(valid ? "✅ Notion 토큰 유효" : "❌ Notion 토큰 무효 (HTTP \(http.statusCode))")
+            completion(valid)
+        }.resume()
+    }
+
+    private func validateGitHubToken(_ token: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "https://api.github.com/user") else {
+            completion(false)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 10
+
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            guard error == nil, let http = response as? HTTPURLResponse else {
+                completion(false)
+                return
+            }
+            let valid = (200..<300).contains(http.statusCode)
+            print(valid ? "✅ GitHub 토큰 유효" : "❌ GitHub 토큰 무효 (HTTP \(http.statusCode))")
+            completion(valid)
+        }.resume()
+    }
+
     // MARK: - 업로드
 
+    /// 토큰 검증이 완료된 후 호출됩니다.
     private func uploadAudio(fileURL: URL) {
-        isUploading = true
-        isCancelled = false
-        processingStage = .transcribing
-        errorMessage = nil
-        transcriptText = nil
-        summaryText = nil
-        notionPageURL = nil
-        
+        DispatchQueue.main.async {
+            self.isUploading = true
+            self.isCancelled = false
+            self.processingStage = .transcribing
+            self.errorMessage = nil
+            self.transcriptText = nil
+            self.summaryText = nil
+            self.notionPageURL = nil
+        }
+        startTranscription(fileURL: fileURL)
+    }
+
+    private func startTranscription(fileURL: URL) {
         let path = fileURL.path
         var fileSize: Int64 = 0
         do {
@@ -466,6 +694,7 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                             self.notionPageURL = pageURL
                             let title = self.buildNotionTitle(from: summary)
                             self.sendSlackNotification(title: title, notionURL: pageURL)
+                            self.pushSummaryToGitHub(summary: summary, title: title)
                         case .failure(let error):
                             self.processingStage = .idle
                             self.errorMessage = "Notion 등록 실패: \(error.localizedDescription)"
@@ -1127,6 +1356,96 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 print("✅ Slack 웹훅 전송 성공")
             }
         }.resume()
+    }
+
+    // MARK: - GitHub 위키 레포에 회의록 푸시
+
+    private let wikiRepoOwner = "dev-rsquare"
+    private let wikiRepoName = "rtb-wiki"
+    private let wikiMeetingsPath = "rtb-unified/meetings"
+
+    private func pushSummaryToGitHub(summary: String, title: String) {
+        let githubToken = SettingsManager.shared.githubToken
+        guard !githubToken.isEmpty else {
+            print("⚠️ GitHub 토큰이 설정되지 않아 위키 푸시를 건너뜁니다.")
+            return
+        }
+
+        let now = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "ko_KR")
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dateString = dateFormatter.string(from: now)
+
+        // 제목에서 파일명 생성: 공백 → 하이픈, 특수문자 제거
+        let rawTitle = extractRawTitle(from: summary)
+        let sanitizedTitle = rawTitle
+            .replacingOccurrences(of: " ", with: "-")
+            .components(separatedBy: CharacterSet.alphanumerics
+                .union(.init(charactersIn: "-_가-힣ㄱ-ㅎㅏ-ㅣ"))
+                .inverted)
+            .joined()
+
+        let fileName = "\(dateString)-\(sanitizedTitle).md"
+        let filePath = "\(wikiMeetingsPath)/\(fileName)"
+        let commitMessage = "feat: \(dateString) \(rawTitle) 회의록"
+
+        print("📤 GitHub 위키 푸시: \(filePath)")
+
+        // GitHub Contents API: PUT /repos/{owner}/{repo}/contents/{path}
+        guard let url = URL(string: "https://api.github.com/repos/\(wikiRepoOwner)/\(wikiRepoName)/contents/\(filePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filePath)") else {
+            print("⚠️ GitHub API URL 생성 실패")
+            return
+        }
+
+        let contentBase64 = Data(summary.utf8).base64EncodedString()
+
+        let payload: [String: Any] = [
+            "message": commitMessage,
+            "content": contentBase64,
+            "branch": "main"
+        ]
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(githubToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 30
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            print("⚠️ GitHub 페이로드 생성 실패: \(error)")
+            return
+        }
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("⚠️ GitHub 위키 푸시 실패: \(error.localizedDescription)")
+                return
+            }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("⚠️ GitHub 응답 형식 오류")
+                return
+            }
+
+            if (200..<300).contains(httpResponse.statusCode) {
+                print("✅ GitHub 위키 푸시 성공: \(filePath)")
+            } else {
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? "응답 없음"
+                print("⚠️ GitHub 위키 푸시 실패 (HTTP \(httpResponse.statusCode)): \(body)")
+            }
+        }.resume()
+    }
+
+    /// 요약 마크다운에서 순수 제목 텍스트만 추출
+    private func extractRawTitle(from summary: String) -> String {
+        let lines = summary.split(separator: "\n", omittingEmptySubsequences: true)
+        return lines.first(where: { $0.hasPrefix("# ") })?
+            .replacingOccurrences(of: "# ", with: "")
+            ?? "회의록"
     }
 
     private let maxRetryCount = 2

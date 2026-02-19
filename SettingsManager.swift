@@ -11,6 +11,7 @@ final class SettingsManager: ObservableObject {
     private let notionKeyKey = "NOTION_API_KEY"
     private let wikiPathKey = "WIKI_PATH"
     private let wikiBookmarkKey = "WIKI_BOOKMARK"
+    private let githubTokenKey = "GITHUB_TOKEN"
 
     @Published var openAIKey: String = "" {
         didSet {
@@ -32,7 +33,12 @@ final class SettingsManager: ObservableObject {
             UserDefaults.standard.set(wikiPath, forKey: wikiPathKey)
         }
     }
-    
+    @Published var githubToken: String = "" {
+        didSet {
+            UserDefaults.standard.set(githubToken, forKey: githubTokenKey)
+        }
+    }
+
     private init() {
         objectWillChange = ObservableObjectPublisher()
         
@@ -48,11 +54,14 @@ final class SettingsManager: ObservableObject {
         let envNotion = env["NOTION_API_KEY"] ?? ""
 
         let savedWikiPath = UserDefaults.standard.string(forKey: wikiPathKey)
+        let savedGithubToken = UserDefaults.standard.string(forKey: githubTokenKey)
+        let envGithubToken = env["GITHUB_TOKEN"] ?? ""
 
         openAIKey = savedOpenAI?.isEmpty == false ? savedOpenAI! : envOpenAI
         anthropicKey = savedAnthropic?.isEmpty == false ? savedAnthropic! : envAnthropic
         notionKey = savedNotion?.isEmpty == false ? savedNotion! : envNotion
         wikiPath = savedWikiPath ?? ""
+        githubToken = savedGithubToken?.isEmpty == false ? savedGithubToken! : envGithubToken
     }
     
     func masked(_ text: String) -> String {

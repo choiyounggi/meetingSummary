@@ -5,6 +5,7 @@ struct SettingsView: View {
     @State private var showOpenAIKey: Bool = false
     @State private var showAnthropicKey: Bool = false
     @State private var showNotionKey: Bool = false
+    @State private var showGithubToken: Bool = false
     @State private var isAPIExpanded: Bool = true
     @State private var isWikiExpanded: Bool = true
 
@@ -40,6 +41,15 @@ struct SettingsView: View {
                         placeholder: "ntn_...",
                         value: $settings.notionKey,
                         isVisible: $showNotionKey
+                    )
+
+                    Divider()
+
+                    apiKeyRow(
+                        label: "GitHub",
+                        placeholder: "ghp_...",
+                        value: $settings.githubToken,
+                        isVisible: $showGithubToken
                     )
 
                     // 저장 버튼

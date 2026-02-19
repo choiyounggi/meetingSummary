@@ -339,7 +339,7 @@ struct MeetingSummaryView: View {
 
                         // 단계 표시
                         HStack(spacing: 0) {
-                            ForEach([ProcessingStage.transcribing, .summarizing, .uploading], id: \.rawValue) { stage in
+                            ForEach([ProcessingStage.validating, .transcribing, .summarizing, .uploading], id: \.rawValue) { stage in
                                 VStack(spacing: 4) {
                                     Circle()
                                         .fill(recorder.processingStage.rawValue >= stage.rawValue ? Color.blue : Color.gray.opacity(0.3))
@@ -464,6 +464,7 @@ struct MeetingSummaryView: View {
 
     private func stageLabel(_ stage: ProcessingStage) -> String {
         switch stage {
+        case .validating: return "검증"
         case .transcribing: return "STT"
         case .summarizing: return "요약"
         case .uploading: return "등록"
