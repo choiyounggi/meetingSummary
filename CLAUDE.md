@@ -1,39 +1,74 @@
 # MeetingSummary (회의록 요약 서비스)
 
-회의 내용을 녹음, STT 변환 및 요약해서 노션에 정리해 주는 macOS 앱이다.
-Whisper로 STT 변환 후 Claude로 요약하여 Notion에 회의록을 등록한다.
+회의 내용을 녹음, STT 변환 및 요약해서 Notion에 정리하고, GitHub 위키에 자동 커밋하는 macOS 앱이다.
+Whisper로 STT 변환 후 위키 기반 컨텍스트를 주입하여 Claude로 요약하고, Notion 등록 → Slack 알림 → GitHub 위키 푸시까지 자동화한다.
 
 ## 기술 스택
 
 - **언어**: Swift 5
 - **프레임워크**: SwiftUI, AVFoundation, Combine
 - **플랫폼**: macOS (AppKit + SwiftUI)
-- **외부 API**: OpenAI Whisper (STT), Anthropic Claude (요약), Notion API, Slack Webhook
+- **외부 API**: OpenAI Whisper (STT), Anthropic Claude (요약), Notion API, Slack Webhook, GitHub Contents API
+
+## 처리 플로우
+
+```
+[토큰 검증] → [STT 변환] → [Claude 요약] → [Notion 등록] → [Slack 알림] → [GitHub 위키 푸시]
+```
+
+- 녹음 버튼: 토큰 검증 → 마이크 권한 → 녹음 → STT → 요약 → 등록
+- 드래그 앤 드롭: 파일 로드 → 토큰 검증 → STT → 요약 → 등록
+- 20MB 초과 파일: 10분 단위 청크 분할 → 병렬 STT (실패 시 최대 2회 재시도)
 
 ## 프로젝트 구조
 
 ```
 meetingSummary/
 ├── MeetingSummaryApp.xcodeproj    # Xcode 프로젝트
-├── MeetingSummaryApp/             # 앱 소스
+├── MeetingSummaryApp/             # 앱 소스 (FileSystemSynchronizedRootGroup)
 │   ├── MeetingSummaryApp.swift    # @main 앱 진입점
 │   ├── AppDelegate.swift          # 메뉴바 아이콘 및 윈도우 관리
 │   ├── ContentView.swift          # 탭 네비게이션 컨테이너
-│   ├── AudioRecorder.swift        # 녹음, STT, 요약, Notion 업로드 핵심 로직
+│   ├── AudioRecorder.swift        # 녹음, STT, 요약, Notion/GitHub 업로드, 토큰 검증
 │   ├── WaveformView.swift         # 실시간 파형 시각화
 │   ├── WindowExtensions.swift     # Always-on-top 윈도우 설정
 │   ├── Info.plist                 # 앱 권한 및 설정
 │   └── Assets.xcassets/           # 앱 아이콘 및 색상 에셋
 ├── MeetingSummaryView.swift       # 녹음 및 요약 탭 뷰
-├── SettingsView.swift             # 설정 탭 뷰 (API 키 관리)
-├── SettingsManager.swift          # 설정값 싱글턴 (UserDefaults)
-└── CLAUDE.md
+├── SettingsView.swift             # 설정 탭 뷰 (API 키, 위키 경로 관리)
+├── SettingsManager.swift          # 설정값 싱글턴 (UserDefaults, Security-Scoped Bookmark)
+├── WikiContextLoader.swift        # 위키 문서 로드 및 STT 보정 사전 기반 시스템 프롬프트 생성
+├── CLAUDE.md
+└── README.md
 ```
+
+## 주요 모듈 설명
+
+### AudioRecorder.swift
+- `ProcessingStage`: idle → validating → transcribing → summarizing → uploading → completed
+- `validateAllTokens()`: OpenAI, Anthropic, Notion, GitHub 토큰을 병렬로 유효성 검증
+- `transcribeLargeAudio()`: 대용량 오디오를 청크 분할 → 병렬 STT (재시도 포함)
+- `summarizeWithClaude()`: WikiContextLoader로 위키 기반 시스템 프롬프트 주입
+- `pushSummaryToGitHub()`: GitHub Contents API로 `dev-rsquare/rtb-wiki` 레포에 회의록 커밋
+
+### WikiContextLoader.swift
+- 위키 디렉토리에서 3개 핵심 문서를 읽어 컨텍스트 생성:
+  - `team/company/rsquare-profile.md` (회사 프로필)
+  - `rtb-common/RTB_CONTEXT.md` (시스템 개요/도메인 모델)
+  - `rtb-common/glossary.md` (용어사전)
+- STT 보정 사전: 오인식 패턴 → 정확한 표기 매핑 테이블 내장
+- 팀원 이름 보정 테이블 포함
+- 세션당 1회 로드 후 캐싱, 위키 미설정 시 하드코딩 폴백 프롬프트 사용
+
+### SettingsManager.swift
+- `openAIKey`, `anthropicKey`, `notionKey`, `githubToken`, `wikiPath` 관리
+- Security-Scoped Bookmark으로 샌드박스 환경에서 위키 폴더 접근 유지
 
 ## 빌드 및 실행
 
 - Xcode에서 `MeetingSummaryApp.xcodeproj`를 열고 빌드한다.
 - 마이크 권한이 필요하다 (`Info.plist`에 `NSMicrophoneUsageDescription` 설정됨).
+- App Sandbox 환경: `ENABLE_USER_SELECTED_FILES = readonly`, `ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES`
 
 ## 코딩 컨벤션
 
