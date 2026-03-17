@@ -19,15 +19,17 @@ enum ProcessingStage: Int, CaseIterable {
     case idle = 0
     case validating = 1      // API 토큰 검증 중
     case transcribing = 2    // STT 변환 중
-    case summarizing = 3     // 요약 중
-    case uploading = 4       // Notion 등록 중
-    case completed = 5       // 완료
+    case diarizing = 3       // 화자 분리 중
+    case summarizing = 4     // 요약 중
+    case uploading = 5       // Notion 등록 중
+    case completed = 6       // 완료
 
     var description: String {
         switch self {
         case .idle: return ""
         case .validating: return "API 토큰 검증 중..."
         case .transcribing: return "음성을 텍스트로 변환 중..."
+        case .diarizing: return "화자 분리 중..."
         case .summarizing: return "회의 내용 요약 중..."
         case .uploading: return "Notion에 등록 중..."
         case .completed: return "완료"
@@ -38,7 +40,8 @@ enum ProcessingStage: Int, CaseIterable {
         switch self {
         case .idle: return 0.0
         case .validating: return 0.05
-        case .transcribing: return 0.30
+        case .transcribing: return 0.25
+        case .diarizing: return 0.45
         case .summarizing: return 0.60
         case .uploading: return 0.85
         case .completed: return 1.0
@@ -117,7 +120,9 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 // 3) 검증 통과 후 마이크 권한 체크 → 녹음 시작
                 self.checkMicPermission { [weak self] granted in
                     guard let self = self, granted else { return }
-                    self.beginRecording()
+                    DispatchQueue.main.async {
+                        self.beginRecording()
+                    }
                 }
             }
         }
@@ -423,6 +428,9 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         if settings.anthropicKey.isEmpty { missingKeys.append("Anthropic") }
         if settings.notionKey.isEmpty { missingKeys.append("Notion") }
         if settings.githubToken.isEmpty { missingKeys.append("GitHub") }
+        if settings.diarizationMode == .pyannote && settings.huggingFaceToken.isEmpty {
+            missingKeys.append("HuggingFace")
+        }
 
         if !missingKeys.isEmpty {
             let msg = "다음 API 키가 설정되지 않았습니다: \(missingKeys.joined(separator: ", "))\n설정 탭에서 입력해주세요."
@@ -604,6 +612,20 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     private func startTranscription(fileURL: URL) {
+        let mode = SettingsManager.shared.diarizationMode
+
+        switch mode {
+        case .off:
+            startTranscriptionPlain(fileURL: fileURL)
+        case .claude:
+            startTranscriptionWithClaudeDiarization(fileURL: fileURL)
+        case .pyannote:
+            startTranscriptionWithPyannoteDiarization(fileURL: fileURL)
+        }
+    }
+
+    /// 화자 분리 없이 기존 방식으로 STT 처리
+    private func startTranscriptionPlain(fileURL: URL) {
         let path = fileURL.path
         var fileSize: Int64 = 0
         do {
@@ -613,14 +635,14 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         } catch {
             print("⚠️ Failed to read file attributes for upload: \(error)")
         }
-        
+
         let maxSingleSize: Int64 = 20 * 1024 * 1024
-        
+
         if fileSize > 0 && fileSize > maxSingleSize {
             print("🔪 Large audio detected (\(fileSize) bytes), using chunked STT")
             transcribeLargeAudio(fileURL: fileURL) { [weak self] result in
                 guard let self = self else { return }
-                
+
                 switch result {
                 case .failure(let error):
                     DispatchQueue.main.async {
@@ -645,12 +667,12 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 }
                 return
             }
-            
+
             let fileName = fileURL.lastPathComponent
-            
+
             transcribeWithOpenAI(audioData: audioData, fileName: fileName) { [weak self] result in
                 guard let self = self else { return }
-                
+
                 switch result {
                 case .failure(let error):
                     DispatchQueue.main.async {
@@ -661,6 +683,96 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 case .success(let transcript):
                     print("📝 STT transcript length: \(transcript.count) chars")
                     self.handleTranscript(transcript)
+                }
+            }
+        }
+    }
+
+    // MARK: - 화자 분리: Claude 추론 모드 (Whisper 타임스탬프 → Claude 화자 추론)
+
+    /// Whisper verbose_json으로 타임스탬프 포함 STT를 수행한 뒤, Claude에게 화자 분리를 요청합니다.
+    private func startTranscriptionWithClaudeDiarization(fileURL: URL) {
+        let path = fileURL.path
+        var fileSize: Int64 = 0
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: path)
+            fileSize = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+            print("⬆️ [화자 분리] Transcribe file path: \(path), size: \(fileSize) bytes")
+        } catch {
+            print("⚠️ Failed to read file attributes: \(error)")
+        }
+
+        let maxSingleSize: Int64 = 20 * 1024 * 1024
+
+        // 1) Whisper STT (타임스탬프 포함)
+        let sttCompletion: (Result<([WhisperSegment], String), Error>) -> Void = { [weak self] result in
+            guard let self = self else { return }
+            guard self.isCancelled != true else { return }
+
+            switch result {
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    self.isUploading = false
+                    self.processingStage = .idle
+                    self.errorMessage = "STT 실패: \(error.localizedDescription)"
+                }
+            case .success(let (segments, plainText)):
+                // 2) Claude 화자 추론
+                DispatchQueue.main.async { self.processingStage = .diarizing }
+
+                // segments가 비어있으면 화자 분리를 건너뛰고 일반 텍스트로 진행
+                guard !segments.isEmpty else {
+                    print("⚠️ [화자 분리] Whisper segments가 비어있어 화자 분리 건너뜀")
+                    self.handleTranscript(plainText)
+                    return
+                }
+
+                let timestampedText = self.formatTimestampedSegments(segments)
+                print("📝 [화자 분리] STT 완료 (\(segments.count)개 세그먼트), Claude 화자 추론 시작")
+
+                self.identifySpeakersWithClaude(timestampedText: timestampedText) { [weak self] diarResult in
+                    guard let self = self else { return }
+                    guard self.isCancelled != true else { return }
+
+                    let transcript: String
+                    switch diarResult {
+                    case .success(let diarizedText):
+                        transcript = diarizedText
+                        print("📝 Claude 화자 분리 완료 (\(transcript.count)자)")
+                    case .failure(let error):
+                        // 화자 추론 실패 시 일반 텍스트로 폴백
+                        transcript = plainText
+                        print("⚠️ Claude 화자 분리 실패 (일반 텍스트로 진행): \(error.localizedDescription)")
+                    }
+
+                    self.handleTranscript(transcript)
+                }
+            }
+        }
+
+        if fileSize > 0 && fileSize > maxSingleSize {
+            transcribeLargeAudioWithTimestamps(fileURL: fileURL, completion: sttCompletion)
+        } else {
+            let audioData: Data
+            do {
+                audioData = try Data(contentsOf: fileURL)
+            } catch {
+                DispatchQueue.main.async {
+                    self.isUploading = false
+                    self.processingStage = .idle
+                    self.errorMessage = "녹음 파일 읽기 실패: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            transcribeWithOpenAIVerbose(audioData: audioData, fileName: fileURL.lastPathComponent) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let response):
+                    let segments = response.segments?.map { WhisperSegment(start: $0.start, end: $0.end, text: $0.text) } ?? []
+                    sttCompletion(.success((segments, response.text)))
+                case .failure(let error):
+                    sttCompletion(.failure(error))
                 }
             }
         }
@@ -692,9 +804,10 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                         case .success(let pageURL):
                             self.processingStage = .completed
                             self.notionPageURL = pageURL
-                            let title = self.buildNotionTitle(from: summary)
-                            self.sendSlackNotification(title: title, notionURL: pageURL)
-                            self.pushSummaryToGitHub(summary: summary, title: title)
+                            // TODO: 테스트 완료 후 슬랙 알림 및 깃 푸시 재활성화
+                            // let title = self.buildNotionTitle(from: summary)
+                            // self.sendSlackNotification(title: title, notionURL: pageURL)
+                            // self.pushSummaryToGitHub(summary: summary, title: title)
                         case .failure(let error):
                             self.processingStage = .idle
                             self.errorMessage = "Notion 등록 실패: \(error.localizedDescription)"
@@ -705,8 +818,511 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
     
+    // MARK: - 화자 분리 관련 타입
+
+    private struct WhisperSegment {
+        let start: Double
+        let end: Double
+        let text: String
+    }
+
+    private struct WhisperVerboseResponse: Decodable {
+        struct Segment: Decodable {
+            let start: Double
+            let end: Double
+            let text: String
+        }
+        let segments: [Segment]?
+        let text: String
+    }
+
+    // MARK: - 화자 분리 헬퍼
+
+    /// Whisper 세그먼트를 타임스탬프 포함 텍스트로 포맷합니다.
+    private func formatTimestampedSegments(_ segments: [WhisperSegment]) -> String {
+        return segments.map { seg in
+            let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return "" }
+            let startMin = Int(seg.start) / 60
+            let startSec = Int(seg.start) % 60
+            let endMin = Int(seg.end) / 60
+            let endSec = Int(seg.end) % 60
+            return "[\(String(format: "%02d:%02d", startMin, startSec))~\(String(format: "%02d:%02d", endMin, endSec))] \(text)"
+        }.filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    /// Claude API를 호출하여 타임스탬프 포함 텍스트에서 화자를 추론합니다.
+    private func identifySpeakersWithClaude(timestampedText: String, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+            completion(.failure(NSError(domain: "AudioRecorder", code: -70, userInfo: [NSLocalizedDescriptionKey: "잘못된 Claude API URL"])))
+            return
+        }
+
+        let anthropicKey = SettingsManager.shared.anthropicKey
+        let model = "claude-sonnet-4-20250514"
+
+        let systemPrompt = """
+당신은 회의 음성인식 텍스트에서 화자를 구분하는 전문가입니다.
+
+## 규칙
+1. 타임스탬프 사이의 갭(침묵), 대화 맥락(질문↔답변, 보고↔피드백), 어투 변화를 근거로 화자를 구분하세요.
+2. 화자는 "화자 A", "화자 B", "화자 C" 등으로 라벨링하세요.
+3. 동일 화자의 연속 발화는 하나로 합치세요.
+4. 출력 형식은 반드시 아래와 같이 유지하세요:
+   [화자 A] 발화 내용
+   [화자 B] 발화 내용
+5. 원문 텍스트를 임의로 수정, 요약, 생략하지 마세요. 그대로 유지하되 화자 라벨만 추가합니다.
+6. 화자를 구분할 수 없는 구간은 직전 화자의 발화로 이어 붙이세요.
+"""
+
+        let userPrompt = """
+아래는 회의 음성인식(STT) 결과입니다. 타임스탬프가 포함되어 있습니다.
+타임스탬프 갭과 대화 맥락을 분석하여 화자를 구분해주세요.
+
+[STT 결과 시작]
+\(timestampedText)
+[STT 결과 끝]
+"""
+
+        let payload: [String: Any] = [
+            "model": model,
+            "max_tokens": 16000,
+            "temperature": 0.1,
+            "system": systemPrompt,
+            "messages": [
+                [
+                    "role": "user",
+                    "content": [
+                        ["type": "text", "text": userPrompt]
+                    ]
+                ]
+            ]
+        ]
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 900
+        config.timeoutIntervalForResource = 900
+        let session = URLSession(configuration: config)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(anthropicKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.timeoutInterval = 900
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            completion(.failure(error))
+            return
+        }
+
+        let task = session.dataTask(with: request) { [weak self] data, response, error in
+            if let error = error {
+                if (error as NSError).code == NSURLErrorCancelled { return }
+                completion(.failure(error))
+                return
+            }
+            guard self?.isCancelled != true else { return }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(.failure(NSError(domain: "AudioRecorder", code: -71, userInfo: [NSLocalizedDescriptionKey: "잘못된 Claude 응답 형식"])))
+                return
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                completion(.failure(NSError(domain: "AudioRecorder", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Claude 화자 분리 응답 코드: \(httpResponse.statusCode)"])))
+                return
+            }
+
+            guard let data = data else {
+                completion(.failure(NSError(domain: "AudioRecorder", code: -72, userInfo: [NSLocalizedDescriptionKey: "Claude 화자 분리 응답 데이터 없음"])))
+                return
+            }
+
+            do {
+                let decoded = try JSONDecoder().decode(AnthropicMessageResponse.self, from: data)
+                let text = decoded.content.compactMap { $0.text }.joined()
+                completion(.success(text))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+
+        currentTask = task
+        task.resume()
+    }
+
+    // MARK: - 화자 분리: pyannote 모드 (pyannote + Whisper verbose_json 병렬 실행)
+
+    /// pyannote 화자 분리와 Whisper STT(타임스탬프)를 병렬로 실행하여 화자 라벨이 포함된 텍스트를 생성합니다.
+    private func startTranscriptionWithPyannoteDiarization(fileURL: URL) {
+        DispatchQueue.main.async { self.processingStage = .diarizing }
+
+        let path = fileURL.path
+        var fileSize: Int64 = 0
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: path)
+            fileSize = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+            print("⬆️ [pyannote] Transcribe file path: \(path), size: \(fileSize) bytes")
+        } catch {
+            print("⚠️ Failed to read file attributes: \(error)")
+        }
+
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var diarizationSegments: [PyannoteDiarizationOutput.Segment]?
+        var whisperSegments: [WhisperSegment]?
+        var plainText: String?
+        var sttError: Error?
+
+        // 1) pyannote 화자 분리 (전체 파일)
+        group.enter()
+        runPyannoteDiarization(audioFileURL: fileURL) { result in
+            lock.lock()
+            switch result {
+            case .success(let segments):
+                diarizationSegments = segments
+                print("✅ [pyannote] 화자 분리 완료 (\(segments.count)개 세그먼트)")
+            case .failure(let error):
+                print("⚠️ [pyannote] 화자 분리 실패 (일반 텍스트로 진행): \(error.localizedDescription)")
+            }
+            lock.unlock()
+            group.leave()
+        }
+
+        // 2) Whisper STT (타임스탬프 포함)
+        let maxSingleSize: Int64 = 20 * 1024 * 1024
+
+        if fileSize > 0 && fileSize > maxSingleSize {
+            group.enter()
+            transcribeLargeAudioWithTimestamps(fileURL: fileURL) { result in
+                lock.lock()
+                switch result {
+                case .success(let (segments, text)):
+                    whisperSegments = segments
+                    plainText = text
+                case .failure(let error):
+                    sttError = error
+                }
+                lock.unlock()
+                group.leave()
+            }
+        } else {
+            let audioData: Data
+            do {
+                audioData = try Data(contentsOf: fileURL)
+            } catch {
+                DispatchQueue.main.async {
+                    self.isUploading = false
+                    self.processingStage = .idle
+                    self.errorMessage = "녹음 파일 읽기 실패: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            group.enter()
+            transcribeWithOpenAIVerbose(audioData: audioData, fileName: fileURL.lastPathComponent) { result in
+                lock.lock()
+                switch result {
+                case .success(let response):
+                    whisperSegments = response.segments?.map { WhisperSegment(start: $0.start, end: $0.end, text: $0.text) }
+                    plainText = response.text
+                case .failure(let error):
+                    sttError = error
+                }
+                lock.unlock()
+                group.leave()
+            }
+        }
+
+        // 3) 병합 및 처리
+        group.notify(queue: .global(qos: .userInitiated)) { [weak self] in
+            guard let self = self else { return }
+            guard self.isCancelled != true else { return }
+
+            if let error = sttError {
+                DispatchQueue.main.async {
+                    self.isUploading = false
+                    self.processingStage = .idle
+                    self.errorMessage = "STT 실패: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            let transcript: String
+            if let diarSegs = diarizationSegments, let whisperSegs = whisperSegments, !diarSegs.isEmpty {
+                transcript = self.mergePyannoteWithWhisper(whisperSegments: whisperSegs, diarizationSegments: diarSegs)
+                print("📝 [pyannote] 화자 분리 병합 완료 (\(transcript.count)자)")
+            } else {
+                transcript = plainText ?? ""
+                print("📝 [pyannote] STT 텍스트 (화자 분리 미적용) (\(transcript.count)자)")
+            }
+
+            self.handleTranscript(transcript)
+        }
+    }
+
+    // MARK: - pyannote 관련 타입
+
+    private struct PyannoteDiarizationOutput: Decodable {
+        struct Segment: Decodable {
+            let speaker: String
+            let start: Double
+            let end: Double
+        }
+        let segments: [Segment]?
+        let error: String?
+    }
+
+    // MARK: - pyannote Python 스크립트 실행
+
+    /// pyannote.audio Python 스크립트를 실행하여 화자 분리를 수행합니다.
+    private func runPyannoteDiarization(audioFileURL: URL, completion: @escaping (Result<[PyannoteDiarizationOutput.Segment], Error>) -> Void) {
+        let hfToken = SettingsManager.shared.huggingFaceToken
+        let pythonPath = SettingsManager.shared.pythonPath
+
+        guard !hfToken.isEmpty else {
+            completion(.failure(NSError(domain: "AudioRecorder", code: -60,
+                                        userInfo: [NSLocalizedDescriptionKey: "HuggingFace 토큰이 설정되지 않았습니다."])))
+            return
+        }
+
+        guard FileManager.default.isExecutableFile(atPath: pythonPath) else {
+            completion(.failure(NSError(domain: "AudioRecorder", code: -66,
+                                        userInfo: [NSLocalizedDescriptionKey: "Python 실행 파일을 찾을 수 없습니다: \(pythonPath)\n설정에서 올바른 Python 경로를 지정해주세요."])))
+            return
+        }
+
+        // Python 스크립트를 Application Support 내 전용 디렉토리에 작성 (/tmp 사용 금지 — SentinelOne EDR 탐지)
+        let scriptContent = Self.pyannoteDiarizeScript
+        let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let diarizeTmpURL = appSupportURL.appendingPathComponent("MeetingSummaryApp/tmp", isDirectory: true)
+        try? FileManager.default.createDirectory(at: diarizeTmpURL, withIntermediateDirectories: true)
+        let sessionID = UUID().uuidString
+        let scriptURL = diarizeTmpURL.appendingPathComponent("diarize-\(sessionID).py")
+        let outputURL = diarizeTmpURL.appendingPathComponent("diarization-\(sessionID).json")
+
+        do {
+            try scriptContent.write(to: scriptURL, atomically: true, encoding: .utf8)
+        } catch {
+            completion(.failure(NSError(domain: "AudioRecorder", code: -61,
+                                        userInfo: [NSLocalizedDescriptionKey: "화자 분리 스크립트 생성 실패: \(error.localizedDescription)"])))
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: pythonPath)
+            process.arguments = [scriptURL.path, audioFileURL.path, hfToken, outputURL.path]
+
+            let errorPipe = Pipe()
+            process.standardError = errorPipe
+            process.standardOutput = FileHandle.nullDevice
+
+            // stderr를 비동기로 먼저 읽어 Pipe 버퍼 교착을 방지
+            var stderrData = Data()
+            let stderrLock = NSLock()
+            errorPipe.fileHandleForReading.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                if !chunk.isEmpty {
+                    stderrLock.lock()
+                    stderrData.append(chunk)
+                    stderrLock.unlock()
+                }
+            }
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                errorPipe.fileHandleForReading.readabilityHandler = nil
+                try? FileManager.default.removeItem(at: scriptURL)
+                completion(.failure(NSError(domain: "AudioRecorder", code: -62,
+                                            userInfo: [NSLocalizedDescriptionKey: "Python 실행 실패: \(error.localizedDescription)\nPython 경로를 확인해주세요: \(pythonPath)"])))
+                return
+            }
+
+            // 파이프 핸들러 정리
+            errorPipe.fileHandleForReading.readabilityHandler = nil
+
+            // exit code 확인
+            let exitCode = process.terminationStatus
+            if exitCode != 0 {
+                stderrLock.lock()
+                let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+                stderrLock.unlock()
+                try? FileManager.default.removeItem(at: scriptURL)
+                try? FileManager.default.removeItem(at: outputURL)
+                completion(.failure(NSError(domain: "AudioRecorder", code: -62,
+                                            userInfo: [NSLocalizedDescriptionKey: "Python 비정상 종료 (exit code: \(exitCode))\n\(stderrText)"])))
+                return
+            }
+
+            // 임시 스크립트 파일 정리
+            try? FileManager.default.removeItem(at: scriptURL)
+
+            // 결과 JSON 읽기
+            guard FileManager.default.fileExists(atPath: outputURL.path) else {
+                stderrLock.lock()
+                let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+                stderrLock.unlock()
+                completion(.failure(NSError(domain: "AudioRecorder", code: -63,
+                                            userInfo: [NSLocalizedDescriptionKey: "화자 분리 결과 파일이 생성되지 않았습니다.\n\(stderrText)"])))
+                return
+            }
+
+            do {
+                let data = try Data(contentsOf: outputURL)
+                try FileManager.default.removeItem(at: outputURL)
+
+                let output = try JSONDecoder().decode(PyannoteDiarizationOutput.self, from: data)
+
+                if let error = output.error {
+                    completion(.failure(NSError(domain: "AudioRecorder", code: -64,
+                                                userInfo: [NSLocalizedDescriptionKey: "화자 분리 실패: \(error)"])))
+                    return
+                }
+
+                guard let segments = output.segments, !segments.isEmpty else {
+                    completion(.failure(NSError(domain: "AudioRecorder", code: -65,
+                                                userInfo: [NSLocalizedDescriptionKey: "화자 분리 결과가 비어있습니다."])))
+                    return
+                }
+
+                completion(.success(segments))
+            } catch {
+                try? FileManager.default.removeItem(at: outputURL)
+                completion(.failure(error))
+            }
+        }
+    }
+
+    /// pyannote 화자 분리 Python 스크립트
+    private static let pyannoteDiarizeScript = """
+#!/usr/bin/env python3
+import sys
+import json
+
+def main():
+    if len(sys.argv) < 5:
+        result = {"error": "Usage: diarize.py <audio_path> <hf_token> <output_json_path>"}
+        print(json.dumps(result))
+        sys.exit(1)
+
+    audio_path = sys.argv[1]
+    hf_token = sys.argv[2]
+    output_path = sys.argv[3]
+
+    try:
+        from pyannote.audio import Pipeline
+        import torch
+
+        pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            token=hf_token
+        )
+
+        # MPS(Apple Silicon GPU) 사용 시도, 실패하면 CPU로 폴백
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            try:
+                pipeline.to(torch.device("mps"))
+            except Exception:
+                pipeline.to(torch.device("cpu"))
+
+        diarization = pipeline(audio_path)
+
+        segments = []
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            segments.append({
+                "speaker": speaker,
+                "start": round(turn.start, 2),
+                "end": round(turn.end, 2)
+            })
+
+        result = {"segments": segments}
+
+    except ImportError as e:
+        result = {"error": f"pyannote.audio not installed: {str(e)}"}
+    except Exception as e:
+        result = {"error": str(e)}
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False)
+
+if __name__ == "__main__":
+    main()
+"""
+
+    // MARK: - pyannote 화자-텍스트 병합
+
+    /// Whisper 세그먼트와 pyannote 화자 세그먼트를 타임스탬프 기반으로 병합합니다.
+    private func mergePyannoteWithWhisper(whisperSegments: [WhisperSegment], diarizationSegments: [PyannoteDiarizationOutput.Segment]) -> String {
+        var labeledSegments: [(speaker: String, text: String)] = []
+
+        for ws in whisperSegments {
+            let text = ws.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+
+            var bestSpeaker = "Unknown"
+            var bestOverlap: Double = 0
+            var nearestDistance: Double = .infinity
+
+            for ds in diarizationSegments {
+                let overlapStart = max(ws.start, ds.start)
+                let overlapEnd = min(ws.end, ds.end)
+                let overlap = max(0, overlapEnd - overlapStart)
+
+                if overlap > bestOverlap {
+                    bestOverlap = overlap
+                    bestSpeaker = ds.speaker
+                } else if bestOverlap == 0 {
+                    // 오버랩이 없을 때 가장 가까운 세그먼트를 폴백으로 선택
+                    let distance = min(abs(ws.start - ds.end), abs(ws.end - ds.start))
+                    if distance < nearestDistance {
+                        nearestDistance = distance
+                        bestSpeaker = ds.speaker
+                    }
+                }
+            }
+
+            labeledSegments.append((speaker: bestSpeaker, text: text))
+        }
+
+        // 연속된 같은 화자의 발화를 합치기
+        var merged: [(speaker: String, text: String)] = []
+        for seg in labeledSegments {
+            if let last = merged.last, last.speaker == seg.speaker {
+                merged[merged.count - 1] = (speaker: seg.speaker, text: last.text + " " + seg.text)
+            } else {
+                merged.append(seg)
+            }
+        }
+
+        // 화자 이름을 "화자 A", "화자 B" 형태로 변환
+        var speakerMap: [String: String] = [:]
+        let labels = ["A", "B", "C", "D", "E", "F", "G", "H"]
+        var labelIndex = 0
+
+        for seg in merged {
+            if speakerMap[seg.speaker] == nil {
+                let label = labelIndex < labels.count ? labels[labelIndex] : "\(labelIndex + 1)"
+                speakerMap[seg.speaker] = "화자 \(label)"
+                labelIndex += 1
+            }
+        }
+
+        let result = merged.map { seg in
+            let label = speakerMap[seg.speaker] ?? seg.speaker
+            return "[\(label)] \(seg.text)"
+        }.joined(separator: "\n")
+
+        return result
+    }
+
     // MARK: - OpenAI Whisper STT 호출
-    
+
     private struct OpenAITranscriptionResponse: Decodable {
         let text: String
     }
@@ -797,6 +1413,280 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         task.resume()
     }
 
+    // MARK: - Whisper verbose_json (타임스탬프 포함) STT 호출
+
+    /// Whisper API를 verbose_json 형식으로 호출하여 세그먼트 타임스탬프를 포함한 결과를 반환합니다.
+    private func transcribeWithOpenAIVerbose(audioData: Data, fileName: String, completion: @escaping (Result<WhisperVerboseResponse, Error>) -> Void) {
+        guard let url = URL(string: "https://api.openai.com/v1/audio/transcriptions") else {
+            completion(.failure(NSError(domain: "AudioRecorder", code: -1, userInfo: [NSLocalizedDescriptionKey: "잘못된 OpenAI STT URL"])))
+            return
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let lineBreak = "\r\n"
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 900
+        config.timeoutIntervalForResource = 900
+        let session = URLSession(configuration: config)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let openAIKey = SettingsManager.shared.openAIKey
+        request.setValue("Bearer \(openAIKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 900
+
+        var body = Data()
+
+        // model
+        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"model\"\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+        body.append("whisper-1\(lineBreak)".data(using: .utf8)!)
+
+        // language
+        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"language\"\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+        body.append("ko\(lineBreak)".data(using: .utf8)!)
+
+        // response_format = verbose_json
+        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"response_format\"\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+        body.append("verbose_json\(lineBreak)".data(using: .utf8)!)
+
+        // timestamp_granularities[] = segment
+        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"timestamp_granularities[]\"\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+        body.append("segment\(lineBreak)".data(using: .utf8)!)
+
+        // file
+        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\(lineBreak)".data(using: .utf8)!)
+        body.append("Content-Type: audio/m4a\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+        body.append(audioData)
+        body.append(lineBreak.data(using: .utf8)!)
+
+        // end
+        body.append("--\(boundary)--\(lineBreak)".data(using: .utf8)!)
+
+        let task = session.uploadTask(with: request, from: body) { [weak self] data, response, error in
+            if let error = error {
+                if (error as NSError).code == NSURLErrorCancelled { return }
+                completion(.failure(error))
+                return
+            }
+            guard self?.isCancelled != true else { return }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(.failure(NSError(domain: "AudioRecorder", code: -2, userInfo: [NSLocalizedDescriptionKey: "잘못된 OpenAI 응답 형식"])))
+                return
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                let msg = "OpenAI STT 응답 코드: \(httpResponse.statusCode)"
+                completion(.failure(NSError(domain: "AudioRecorder", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])))
+                return
+            }
+
+            guard let data = data else {
+                completion(.failure(NSError(domain: "AudioRecorder", code: -3, userInfo: [NSLocalizedDescriptionKey: "OpenAI STT 응답 데이터 없음"])))
+                return
+            }
+
+            do {
+                let decoded = try JSONDecoder().decode(WhisperVerboseResponse.self, from: data)
+                completion(.success(decoded))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+
+        currentTask = task
+        task.resume()
+    }
+
+    /// 대용량 오디오를 청크로 나누어 타임스탬프 포함 STT를 수행합니다.
+    private func transcribeLargeAudioWithTimestamps(fileURL: URL, completion: @escaping (Result<([WhisperSegment], String), Error>) -> Void) {
+        let asset = AVURLAsset(url: fileURL)
+        let durationSeconds = CMTimeGetSeconds(asset.duration)
+
+        guard durationSeconds.isFinite && durationSeconds > 0 else {
+            completion(.failure(NSError(domain: "AudioRecorder", code: -20,
+                                        userInfo: [NSLocalizedDescriptionKey: "오디오 duration 정보를 가져오지 못했습니다."])))
+            return
+        }
+
+        let chunkDuration: Double = 600.0
+        let chunkCount = max(1, Int(ceil(durationSeconds / chunkDuration)))
+
+        print("🔪 [화자 분리] Splitting audio into \(chunkCount) chunks (duration: \(durationSeconds)s)")
+
+        let exportGroup = DispatchGroup()
+        var chunkURLs: [Int: URL] = [:]
+        var exportError: Error?
+        let lock = NSLock()
+
+        for i in 0..<chunkCount {
+            exportGroup.enter()
+            let startTime = Double(i) * chunkDuration
+            let remaining = durationSeconds - startTime
+            let thisDuration = min(chunkDuration, remaining)
+
+            exportAudioChunk(asset: asset, startTime: startTime, duration: thisDuration) { result in
+                lock.lock()
+                switch result {
+                case .success(let url):
+                    chunkURLs[i] = url
+                case .failure(let error):
+                    if exportError == nil { exportError = error }
+                }
+                lock.unlock()
+                exportGroup.leave()
+            }
+        }
+
+        exportGroup.notify(queue: .global(qos: .userInitiated)) { [weak self] in
+            guard let self = self else { return }
+            guard self.isCancelled != true else { return }
+
+            if let error = exportError {
+                lock.lock()
+                let urls = Array(chunkURLs.values)
+                lock.unlock()
+                urls.forEach { try? FileManager.default.removeItem(at: $0) }
+                completion(.failure(error))
+                return
+            }
+
+            self.transcribeChunksInParallelWithTimestamps(
+                chunkURLs: chunkURLs,
+                chunkCount: chunkCount,
+                chunkDuration: chunkDuration,
+                originalFileName: fileURL.lastPathComponent,
+                completion: completion
+            )
+        }
+    }
+
+    /// 청크들을 병렬로 타임스탬프 포함 STT 처리합니다.
+    private func transcribeChunksInParallelWithTimestamps(
+        chunkURLs: [Int: URL],
+        chunkCount: Int,
+        chunkDuration: Double,
+        originalFileName: String,
+        completion: @escaping (Result<([WhisperSegment], String), Error>) -> Void
+    ) {
+        let sttGroup = DispatchGroup()
+        var chunkResults: [Int: (segments: [WhisperSegment], text: String)] = [:]
+        var failedChunks: [Int: Error] = [:]
+        let lock = NSLock()
+
+        for i in 0..<chunkCount {
+            guard let chunkURL = chunkURLs[i] else { continue }
+            sttGroup.enter()
+
+            transcribeChunkWithRetryTimestamps(chunkURL: chunkURL, index: i, chunkDuration: chunkDuration, originalFileName: originalFileName, retryCount: 0) { result in
+                lock.lock()
+                switch result {
+                case .success(let (segments, text)):
+                    chunkResults[i] = (segments, text)
+                case .failure(let error):
+                    failedChunks[i] = error
+                }
+                lock.unlock()
+                sttGroup.leave()
+            }
+        }
+
+        sttGroup.notify(queue: .global(qos: .userInitiated)) { [weak self] in
+            for url in chunkURLs.values {
+                try? FileManager.default.removeItem(at: url)
+            }
+
+            guard self?.isCancelled != true else { return }
+
+            lock.lock()
+            let failed = failedChunks
+            let results = chunkResults
+            lock.unlock()
+
+            if !failed.isEmpty {
+                let failedIndices = failed.keys.sorted().map { "\($0 + 1)" }.joined(separator: ", ")
+                let firstError = failed.values.first!
+                completion(.failure(NSError(
+                    domain: "AudioRecorder", code: -23,
+                    userInfo: [NSLocalizedDescriptionKey: "STT 실패 (청크 \(failedIndices)): \(firstError.localizedDescription)"]
+                )))
+                return
+            }
+
+            // 전체 세그먼트 합치기 (타임스탬프 오프셋 적용)
+            var allSegments: [WhisperSegment] = []
+            var allText = ""
+            for i in 0..<chunkCount {
+                guard let (segments, text) = results[i] else { continue }
+                let timeOffset = Double(i) * chunkDuration
+                let offsetSegments = segments.map {
+                    WhisperSegment(start: $0.start + timeOffset, end: $0.end + timeOffset, text: $0.text)
+                }
+                allSegments.append(contentsOf: offsetSegments)
+                if !allText.isEmpty { allText += " " }
+                allText += text
+            }
+
+            print("📝 [화자 분리] STT 병렬 처리 완료 (\(chunkCount)개 청크, \(allSegments.count)개 세그먼트)")
+            completion(.success((allSegments, allText)))
+        }
+    }
+
+    /// 단일 청크 타임스탬프 포함 STT (재시도 포함)
+    private func transcribeChunkWithRetryTimestamps(
+        chunkURL: URL,
+        index: Int,
+        chunkDuration: Double,
+        originalFileName: String,
+        retryCount: Int,
+        completion: @escaping (Result<([WhisperSegment], String), Error>) -> Void
+    ) {
+        guard isCancelled != true else { return }
+
+        let chunkData: Data
+        do {
+            chunkData = try Data(contentsOf: chunkURL)
+        } catch {
+            completion(.failure(error))
+            return
+        }
+
+        let chunkFileName = "chunk-\(index)-\(originalFileName)"
+
+        transcribeWithOpenAIVerbose(audioData: chunkData, fileName: chunkFileName) { [weak self] result in
+            guard let self = self else { return }
+
+            switch result {
+            case .success(let response):
+                let segments = response.segments?.map { WhisperSegment(start: $0.start, end: $0.end, text: $0.text) } ?? []
+                completion(.success((segments, response.text)))
+            case .failure(let error):
+                if retryCount < self.maxRetryCount {
+                    let delay = Double(retryCount + 1) * 2.0
+                    print("⚠️ [화자 분리] STT 청크 \(index + 1) 실패, \(delay)초 후 재시도")
+                    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) {
+                        self.transcribeChunkWithRetryTimestamps(
+                            chunkURL: chunkURL, index: index, chunkDuration: chunkDuration,
+                            originalFileName: originalFileName, retryCount: retryCount + 1,
+                            completion: completion
+                        )
+                    }
+                } else {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+
     // MARK: - Anthropic Claude 요약
     private struct AnthropicMessageResponse: Decodable {
         struct ContentBlock: Decodable {
@@ -816,10 +1706,27 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let anthropicKey = SettingsManager.shared.anthropicKey
         let model = "claude-sonnet-4-20250514"
 
-        // 위키 컨텍스트 로드 → 성공 시 위키 기반 프롬프트, 실패 시 기존 하드코딩 프롬프트
-        let wikiPath = SettingsManager.shared.wikiPath
-        let wikiContext = WikiContextLoader.shared.loadContext(from: wikiPath)
-        let systemPrompt = WikiContextLoader.shared.buildSystemPrompt(wikiContext: wikiContext)
+        // wiki-rag 시맨틱 검색 시도 → 실패 시 기존 파일 기반 폴백
+        WikiContextLoader.shared.searchContext(query: transcript) { [weak self] semanticContext in
+            guard let self = self else { return }
+
+            let wikiContext: String?
+            if let semanticContext = semanticContext {
+                print("✅ wiki-rag 시맨틱 검색 컨텍스트 사용")
+                wikiContext = semanticContext
+            } else {
+                print("⚠️ wiki-rag 미응답, 파일 기반 폴백")
+                let wikiPath = SettingsManager.shared.wikiPath
+                wikiContext = WikiContextLoader.shared.loadContext(from: wikiPath)
+            }
+            let systemPrompt = WikiContextLoader.shared.buildSystemPrompt(wikiContext: wikiContext)
+
+            self.callClaudeSummarize(url: url, anthropicKey: anthropicKey, model: model, systemPrompt: systemPrompt, transcript: transcript, completion: completion)
+        }
+    }
+
+    /// Claude 요약 API 호출 (시스템 프롬프트 구성 완료 후 호출)
+    private func callClaudeSummarize(url: URL, anthropicKey: String, model: String, systemPrompt: String, transcript: String, completion: @escaping (Result<String, Error>) -> Void) {
 
         let userPrompt = """
 아래 STT 자동 변환 텍스트를 정제된 회의록으로 재구성해주세요.

@@ -6,8 +6,10 @@ struct SettingsView: View {
     @State private var showAnthropicKey: Bool = false
     @State private var showNotionKey: Bool = false
     @State private var showGithubToken: Bool = false
+    @State private var showHuggingFaceToken: Bool = false
     @State private var isAPIExpanded: Bool = true
     @State private var isWikiExpanded: Bool = true
+    @State private var isDiarizationExpanded: Bool = true
 
     var body: some View {
         VStack(spacing: 10) {
@@ -79,6 +81,68 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 16)
 
+            // 화자 분리 카드
+            CardSection(
+                title: "화자 분리",
+                icon: "person.2.fill",
+                isExpanded: $isDiarizationExpanded
+            ) {
+                VStack(spacing: 12) {
+                    // 모드 선택
+                    Picker("", selection: $settings.diarizationMode) {
+                        ForEach(DiarizationMode.allCases, id: \.self) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    // 모드 설명
+                    Text(settings.diarizationMode.description)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // pyannote 모드일 때만 추가 설정 노출
+                    if settings.diarizationMode == .pyannote {
+                        Divider()
+
+                        apiKeyRow(
+                            label: "HuggingFace Token",
+                            placeholder: "hf_...",
+                            value: $settings.huggingFaceToken,
+                            isVisible: $showHuggingFaceToken
+                        )
+
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Python 경로")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary)
+
+                            TextField("/opt/homebrew/bin/python3", text: $settings.pythonPath)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color(nsColor: .windowBackgroundColor))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .strokeBorder(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 0.5)
+                                )
+
+                            Text("pyannote + torch가 설치된 Python 경로")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+
             // 위키 경로 카드
             CardSection(
                 title: "위키 경로",
@@ -126,6 +190,33 @@ struct SettingsView: View {
                                 .foregroundColor(isValid ? .green : .orange)
                             Spacer()
                         }
+                    }
+
+                    Divider()
+
+                    // Wiki-RAG 서버 URL
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Wiki-RAG 서버")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        TextField("http://localhost:8686", text: $settings.wikiRagURL)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color(nsColor: .windowBackgroundColor))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 0.5)
+                            )
+
+                        Text("시맨틱 검색 기반 위키 컨텍스트 서버 URL")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
                     }
                 }
             }

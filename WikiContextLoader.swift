@@ -7,6 +7,7 @@ final class WikiContextLoader {
 
     private var cachedContext: String?
     private var cachedPath: String?
+    private var cachedSemanticContext: String?
 
     private init() {}
 
@@ -73,10 +74,72 @@ final class WikiContextLoader {
         }
     }
 
+    /// wiki-rag HTTP API를 통해 시맨틱 검색 기반 컨텍스트를 조회한다.
+    /// 서버 연결 실패 시 completion(nil)을 반환하므로, 호출자가 기존 loadContext 폴백을 사용할 수 있다.
+    func searchContext(query: String, completion: @escaping (String?) -> Void) {
+        let baseURL = SettingsManager.shared.wikiRagURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !baseURL.isEmpty, let url = URL(string: "\(baseURL)/api/context") else {
+            print("⚠️ wiki-rag URL이 유효하지 않습니다: \(baseURL)")
+            completion(nil)
+            return
+        }
+
+        // 쿼리 앞 500자만 사용
+        let truncatedQuery = String(query.prefix(500))
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10 // 서버 미실행 시 빠르게 실패
+
+        let body: [String: Any] = ["query": truncatedQuery, "limit": 5]
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            print("⚠️ wiki-rag 요청 직렬화 실패: \(error.localizedDescription)")
+            completion(nil)
+            return
+        }
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else {
+                completion(nil)
+                return
+            }
+
+            if let error = error {
+                print("⚠️ wiki-rag 서버 연결 실패: \(error.localizedDescription)")
+                completion(nil)
+                return
+            }
+
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                print("⚠️ wiki-rag 서버 응답 오류 (HTTP \(statusCode))")
+                completion(nil)
+                return
+            }
+
+            guard let data = data else {
+                print("⚠️ wiki-rag 응답 데이터가 비어있습니다.")
+                completion(nil)
+                return
+            }
+
+            let contextString = self.parseSearchResponse(data: data)
+            if let contextString = contextString {
+                self.cachedSemanticContext = contextString
+                print("✅ wiki-rag 시맨틱 검색 컨텍스트 로드 완료 (길이: \(contextString.count)자)")
+            }
+            completion(contextString)
+        }.resume()
+    }
+
     /// 캐시를 초기화한다.
     func clearCache() {
         cachedContext = nil
         cachedPath = nil
+        cachedSemanticContext = nil
     }
 
     // MARK: - Private
@@ -94,6 +157,50 @@ final class WikiContextLoader {
             return content
         } catch {
             print("⚠️ 위키 파일 읽기 실패: \(path), \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    // MARK: - wiki-rag 응답 파싱
+
+    /// wiki-rag API 응답 JSON을 파싱하여 컨텍스트 문자열로 조합한다.
+    private func parseSearchResponse(data: Data) -> String? {
+        do {
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                print("⚠️ wiki-rag 응답 JSON 파싱 실패")
+                return nil
+            }
+
+            var sections: [String] = []
+
+            // 용어사전
+            if let glossary = json["glossary"] as? String,
+               !glossary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                sections.append("## 도메인 용어사전\n\(glossary)")
+            }
+
+            // 시맨틱 검색 결과
+            if let results = json["results"] as? [[String: Any]], !results.isEmpty {
+                var resultSections: [String] = []
+                for result in results {
+                    let title = result["title"] as? String ?? "제목 없음"
+                    let content = result["content"] as? String ?? ""
+                    guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                    resultSections.append("### \(title)\n\(content)")
+                }
+                if !resultSections.isEmpty {
+                    sections.append("## 관련 위키 문서 (시맨틱 검색)\n\(resultSections.joined(separator: "\n\n"))")
+                }
+            }
+
+            guard !sections.isEmpty else {
+                print("⚠️ wiki-rag 응답에 유효한 컨텍스트가 없습니다.")
+                return nil
+            }
+
+            return sections.joined(separator: "\n\n")
+        } catch {
+            print("⚠️ wiki-rag 응답 파싱 오류: \(error.localizedDescription)")
             return nil
         }
     }
@@ -186,6 +293,8 @@ final class WikiContextLoader {
     private func buildWikiBasedPrompt(wikiContext: String) -> String {
         return """
 당신은 알스퀘어(RSquare) RTB 개발팀의 회의록 전문 정리자입니다.
+
+아래 위키 문서는 이번 회의와 관련된 도메인 지식입니다. 용어, 엔티티 관계, 업무 맥락을 파악하여 정확한 회의록을 작성하는 데 참고하세요.
 
 \(wikiContext)
 

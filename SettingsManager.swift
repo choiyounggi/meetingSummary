@@ -2,9 +2,33 @@ import Foundation
 import Combine
 import SwiftUI
 
+// MARK: - 화자 분리 모드
+
+enum DiarizationMode: Int, CaseIterable {
+    case off = 0        // 화자 분리 미사용
+    case claude = 1     // Claude 추론 (추가 설치 불필요)
+    case pyannote = 2   // pyannote.audio (Python + HuggingFace 토큰 필요)
+
+    var label: String {
+        switch self {
+        case .off: return "OFF"
+        case .claude: return "Claude 추론"
+        case .pyannote: return "pyannote (고급)"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .off: return "화자 분리 없이 STT 텍스트를 그대로 요약합니다."
+        case .claude: return "Whisper 타임스탬프 + Claude 문맥 분석으로 화자를 구분합니다. 추가 설치 불필요."
+        case .pyannote: return "pyannote.audio 음성 특성 분석으로 정확하게 화자를 구분합니다. Python + torch 설치 필요."
+        }
+    }
+}
+
 final class SettingsManager: ObservableObject {
     var objectWillChange: ObservableObjectPublisher
-    
+
     static let shared = SettingsManager()
     private let openAIKeyKey = "OPEN_AI_KEY"
     private let anthropicKeyKey = "ANTHROPIC_KEY"
@@ -12,6 +36,10 @@ final class SettingsManager: ObservableObject {
     private let wikiPathKey = "WIKI_PATH"
     private let wikiBookmarkKey = "WIKI_BOOKMARK"
     private let githubTokenKey = "GITHUB_TOKEN"
+    private let diarizationModeKey = "DIARIZATION_MODE"
+    private let huggingFaceTokenKey = "HUGGINGFACE_TOKEN"
+    private let pythonPathKey = "PYTHON_PATH"
+    private let wikiRagURLKey = "WIKI_RAG_URL"
 
     @Published var openAIKey: String = "" {
         didSet {
@@ -38,6 +66,26 @@ final class SettingsManager: ObservableObject {
             UserDefaults.standard.set(githubToken, forKey: githubTokenKey)
         }
     }
+    @Published var diarizationMode: DiarizationMode = .off {
+        didSet {
+            UserDefaults.standard.set(diarizationMode.rawValue, forKey: diarizationModeKey)
+        }
+    }
+    @Published var huggingFaceToken: String = "" {
+        didSet {
+            UserDefaults.standard.set(huggingFaceToken, forKey: huggingFaceTokenKey)
+        }
+    }
+    @Published var pythonPath: String = "/opt/homebrew/bin/python3" {
+        didSet {
+            UserDefaults.standard.set(pythonPath, forKey: pythonPathKey)
+        }
+    }
+    @Published var wikiRagURL: String = "http://localhost:8686" {
+        didSet {
+            UserDefaults.standard.set(wikiRagURL, forKey: wikiRagURLKey)
+        }
+    }
 
     private init() {
         objectWillChange = ObservableObjectPublisher()
@@ -56,12 +104,20 @@ final class SettingsManager: ObservableObject {
         let savedWikiPath = UserDefaults.standard.string(forKey: wikiPathKey)
         let savedGithubToken = UserDefaults.standard.string(forKey: githubTokenKey)
         let envGithubToken = env["GITHUB_TOKEN"] ?? ""
+        let savedHFToken = UserDefaults.standard.string(forKey: huggingFaceTokenKey)
+        let savedPythonPath = UserDefaults.standard.string(forKey: pythonPathKey)
 
         openAIKey = savedOpenAI?.isEmpty == false ? savedOpenAI! : envOpenAI
         anthropicKey = savedAnthropic?.isEmpty == false ? savedAnthropic! : envAnthropic
         notionKey = savedNotion?.isEmpty == false ? savedNotion! : envNotion
         wikiPath = savedWikiPath ?? ""
         githubToken = savedGithubToken?.isEmpty == false ? savedGithubToken! : envGithubToken
+        diarizationMode = DiarizationMode(rawValue: UserDefaults.standard.integer(forKey: diarizationModeKey)) ?? .off
+        huggingFaceToken = savedHFToken ?? ""
+        pythonPath = savedPythonPath?.isEmpty == false ? savedPythonPath! : "/opt/homebrew/bin/python3"
+
+        let savedWikiRagURL = UserDefaults.standard.string(forKey: wikiRagURLKey)
+        wikiRagURL = savedWikiRagURL?.isEmpty == false ? savedWikiRagURL! : "http://localhost:8686"
     }
     
     func masked(_ text: String) -> String {

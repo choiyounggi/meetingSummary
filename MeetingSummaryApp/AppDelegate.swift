@@ -12,8 +12,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var window: NSWindow?
     private let popover = NSPopover()
+    private var wikiRagProcess: Process?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        startWikiRagServer()
         // 메뉴바 아이템 생성
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -74,5 +76,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        stopWikiRagServer()
+    }
+
+    // MARK: - Wiki-RAG HTTP 서버 자동 관리
+
+    private func startWikiRagServer() {
+        let scriptPath = NSString("~/Desktop/workspace/etc/rtb-wiki-rag/http_api.py").expandingTildeInPath
+        let pythonPath = NSString("~/Desktop/workspace/etc/rtb-wiki-rag/.venv/bin/python").expandingTildeInPath
+
+        guard FileManager.default.fileExists(atPath: scriptPath),
+              FileManager.default.isExecutableFile(atPath: pythonPath) else {
+            print("⚠️ wiki-rag 서버 파일을 찾을 수 없습니다 (파일 기반 폴백 사용)")
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.arguments = [scriptPath]
+        process.currentDirectoryURL = URL(fileURLWithPath: NSString("~/Desktop/workspace/etc/rtb-wiki-rag").expandingTildeInPath)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            wikiRagProcess = process
+            print("✅ wiki-rag HTTP 서버 시작 (PID: \(process.processIdentifier))")
+        } catch {
+            print("⚠️ wiki-rag 서버 시작 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private func stopWikiRagServer() {
+        guard let process = wikiRagProcess, process.isRunning else { return }
+        process.terminate()
+        wikiRagProcess = nil
+        print("✅ wiki-rag HTTP 서버 종료")
     }
 }
