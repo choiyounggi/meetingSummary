@@ -78,13 +78,13 @@ struct CardSection<Content: View>: View {
         }
         .background(
             RoundedRectangle(cornerRadius: DesignToken.cardCornerRadius)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(.ultraThinMaterial)
         )
         .overlay(
             RoundedRectangle(cornerRadius: DesignToken.cardCornerRadius)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.15), lineWidth: 0.5)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.1), lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
+        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
     }
 }
 
@@ -106,7 +106,11 @@ struct StatusBadge: View {
         .padding(.vertical, 6)
         .background(
             Capsule()
-                .fill(color.opacity(0.08))
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule()
+                        .fill(color.opacity(0.08))
+                )
         )
     }
 }
@@ -190,7 +194,11 @@ struct MeetingSummaryView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(DesignToken.errorRed.opacity(0.06))
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(DesignToken.errorRed.opacity(0.04))
+                        )
                 )
                 .padding(.horizontal, 16)
             }
@@ -207,7 +215,10 @@ struct MeetingSummaryView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(isDroppingFile
                                   ? DesignToken.accentIndigo.opacity(0.04)
-                                  : Color(nsColor: .windowBackgroundColor))
+                                  : Color.clear)
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.ultraThinMaterial)
+                            .opacity(isDroppingFile ? 0 : 1)
                         RoundedRectangle(cornerRadius: 8)
                             .strokeBorder(
                                 isDroppingFile
@@ -296,7 +307,7 @@ struct MeetingSummaryView: View {
                                 .frame(width: 32, height: 32)
                                 .background(
                                     Circle()
-                                        .fill(Color(nsColor: .windowBackgroundColor))
+                                        .fill(.ultraThinMaterial)
                                 )
                                 .overlay(
                                     Circle()

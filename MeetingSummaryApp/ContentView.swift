@@ -62,6 +62,7 @@ struct ContentView: View {
             .padding(.horizontal, 20)
             .padding(.top, 14)
             .padding(.bottom, 8)
+            .background(.thinMaterial)
 
             // 헤더 하단 gradient 구분선
             Rectangle()
@@ -107,13 +108,10 @@ struct ContentView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 6)
-            .background(
-                Color(nsColor: .windowBackgroundColor)
-                    .opacity(0.85)
-            )
+            .background(.ultraThinMaterial)
 
             Divider()
-                .opacity(0.5)
+                .opacity(0.3)
                 .padding(.top, 2)
 
             // MARK: - 탭에 따른 콘텐츠 (ZStack + opacity로 뷰 상태 유지)
@@ -133,6 +131,6 @@ struct ContentView: View {
         }
         .frame(minWidth: 400, idealWidth: 480, maxWidth: 520,
                minHeight: 450, idealHeight: 520, maxHeight: 600)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(.ultraThinMaterial)
     }
 }

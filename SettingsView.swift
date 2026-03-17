@@ -143,7 +143,7 @@ struct SettingsView: View {
                                 .padding(.vertical, 8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color(nsColor: .windowBackgroundColor))
+                                        .fill(Color.black.opacity(0.03))
                                 )
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
@@ -153,6 +153,12 @@ struct SettingsView: View {
                                                 : Color(nsColor: .separatorColor).opacity(0.2),
                                             lineWidth: focusedField == .pythonPath ? 1.0 : 0.5
                                         )
+                                )
+                                .shadow(
+                                    color: focusedField == .pythonPath
+                                        ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
+                                        : Color.clear,
+                                    radius: 3, x: 0, y: 0
                                 )
                                 .focused($focusedField, equals: .pythonPath)
 
@@ -185,7 +191,7 @@ struct SettingsView: View {
                             .padding(.vertical, 8)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(nsColor: .windowBackgroundColor))
+                                    .fill(Color.black.opacity(0.03))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
@@ -195,6 +201,12 @@ struct SettingsView: View {
                                             : Color(nsColor: .separatorColor).opacity(0.2),
                                         lineWidth: focusedField == .wikiPath ? 1.0 : 0.5
                                     )
+                            )
+                            .shadow(
+                                color: focusedField == .wikiPath
+                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
+                                    : Color.clear,
+                                radius: 3, x: 0, y: 0
                             )
                             .focused($focusedField, equals: .wikiPath)
 
@@ -235,7 +247,7 @@ struct SettingsView: View {
                             .padding(.vertical, 8)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(nsColor: .windowBackgroundColor))
+                                    .fill(Color.black.opacity(0.03))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
@@ -245,6 +257,12 @@ struct SettingsView: View {
                                             : Color(nsColor: .separatorColor).opacity(0.2),
                                         lineWidth: focusedField == .wikiRagURL ? 1.0 : 0.5
                                     )
+                            )
+                            .shadow(
+                                color: focusedField == .wikiRagURL
+                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
+                                    : Color.clear,
+                                radius: 3, x: 0, y: 0
                             )
                             .focused($focusedField, equals: .wikiRagURL)
 
@@ -313,7 +331,7 @@ struct SettingsView: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .fill(Color.black.opacity(0.03))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
@@ -323,6 +341,12 @@ struct SettingsView: View {
                             : Color(nsColor: .separatorColor).opacity(0.2),
                         lineWidth: focusedField == field ? 1.0 : 0.5
                     )
+            )
+            .shadow(
+                color: focusedField == field
+                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
+                    : Color.clear,
+                radius: 3, x: 0, y: 0
             )
             .focused($focusedField, equals: field)
         }
