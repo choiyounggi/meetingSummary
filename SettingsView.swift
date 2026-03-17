@@ -10,6 +10,17 @@ struct SettingsView: View {
     @State private var isAPIExpanded: Bool = true
     @State private var isWikiExpanded: Bool = true
     @State private var isDiarizationExpanded: Bool = true
+    @FocusState private var focusedField: SettingsField?
+
+    // MARK: - 디자인 토큰
+
+    private static let accentIndigo = Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 1.0))
+    private static let successGreen = Color(nsColor: NSColor(red: 0.16, green: 0.72, blue: 0.53, alpha: 1.0))
+
+    private enum SettingsField: Hashable {
+        case openAI, anthropic, notion, github, huggingFace
+        case pythonPath, wikiPath, wikiRagURL
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -24,7 +35,8 @@ struct SettingsView: View {
                         label: "OpenAI",
                         placeholder: "sk-...",
                         value: $settings.openAIKey,
-                        isVisible: $showOpenAIKey
+                        isVisible: $showOpenAIKey,
+                        field: .openAI
                     )
 
                     Divider()
@@ -33,7 +45,8 @@ struct SettingsView: View {
                         label: "Anthropic",
                         placeholder: "sk-ant-...",
                         value: $settings.anthropicKey,
-                        isVisible: $showAnthropicKey
+                        isVisible: $showAnthropicKey,
+                        field: .anthropic
                     )
 
                     Divider()
@@ -42,7 +55,8 @@ struct SettingsView: View {
                         label: "Notion",
                         placeholder: "ntn_...",
                         value: $settings.notionKey,
-                        isVisible: $showNotionKey
+                        isVisible: $showNotionKey,
+                        field: .notion
                     )
 
                     Divider()
@@ -51,7 +65,8 @@ struct SettingsView: View {
                         label: "GitHub",
                         placeholder: "ghp_...",
                         value: $settings.githubToken,
-                        isVisible: $showGithubToken
+                        isVisible: $showGithubToken,
+                        field: .github
                     )
 
                     // 저장 버튼
@@ -74,7 +89,7 @@ struct SettingsView: View {
                             .padding(.vertical, 6)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(Color(nsColor: NSColor(red: 0.25, green: 0.25, blue: 0.3, alpha: 1.0)))
+                        .tint(Self.accentIndigo)
                     }
                     .padding(.top, 4)
                 }
@@ -110,7 +125,8 @@ struct SettingsView: View {
                             label: "HuggingFace Token",
                             placeholder: "hf_...",
                             value: $settings.huggingFaceToken,
-                            isVisible: $showHuggingFaceToken
+                            isVisible: $showHuggingFaceToken,
+                            field: .huggingFace
                         )
 
                         Divider()
@@ -124,15 +140,21 @@ struct SettingsView: View {
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 12, design: .monospaced))
                                 .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
+                                .padding(.vertical, 8)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 6)
+                                    RoundedRectangle(cornerRadius: 8)
                                         .fill(Color(nsColor: .windowBackgroundColor))
                                 )
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .strokeBorder(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 0.5)
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(
+                                            focusedField == .pythonPath
+                                                ? Self.accentIndigo.opacity(0.5)
+                                                : Color(nsColor: .separatorColor).opacity(0.2),
+                                            lineWidth: focusedField == .pythonPath ? 1.0 : 0.5
+                                        )
                                 )
+                                .focused($focusedField, equals: .pythonPath)
 
                             Text("pyannote + torch가 설치된 Python 경로")
                                 .font(.system(size: 10))
@@ -160,15 +182,21 @@ struct SettingsView: View {
                             .textFieldStyle(.plain)
                             .font(.system(size: 12, design: .monospaced))
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
+                            .padding(.vertical, 8)
                             .background(
-                                RoundedRectangle(cornerRadius: 6)
+                                RoundedRectangle(cornerRadius: 8)
                                     .fill(Color(nsColor: .windowBackgroundColor))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 0.5)
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(
+                                        focusedField == .wikiPath
+                                            ? Self.accentIndigo.opacity(0.5)
+                                            : Color(nsColor: .separatorColor).opacity(0.2),
+                                        lineWidth: focusedField == .wikiPath ? 1.0 : 0.5
+                                    )
                             )
+                            .focused($focusedField, equals: .wikiPath)
 
                         Button {
                             selectWikiFolder()
@@ -184,10 +212,10 @@ struct SettingsView: View {
                         HStack(spacing: 4) {
                             Image(systemName: isValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                                 .font(.system(size: 11))
-                                .foregroundColor(isValid ? .green : .orange)
+                                .foregroundColor(isValid ? Self.successGreen : .orange)
                             Text(isValid ? "경로 확인됨" : "경로를 찾을 수 없습니다")
                                 .font(.system(size: 11))
-                                .foregroundColor(isValid ? .green : .orange)
+                                .foregroundColor(isValid ? Self.successGreen : .orange)
                             Spacer()
                         }
                     }
@@ -204,15 +232,21 @@ struct SettingsView: View {
                             .textFieldStyle(.plain)
                             .font(.system(size: 12, design: .monospaced))
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
+                            .padding(.vertical, 8)
                             .background(
-                                RoundedRectangle(cornerRadius: 6)
+                                RoundedRectangle(cornerRadius: 8)
                                     .fill(Color(nsColor: .windowBackgroundColor))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 0.5)
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(
+                                        focusedField == .wikiRagURL
+                                            ? Self.accentIndigo.opacity(0.5)
+                                            : Color(nsColor: .separatorColor).opacity(0.2),
+                                        lineWidth: focusedField == .wikiRagURL ? 1.0 : 0.5
+                                    )
                             )
+                            .focused($focusedField, equals: .wikiRagURL)
 
                         Text("시맨틱 검색 기반 위키 컨텍스트 서버 URL")
                             .font(.system(size: 10))
@@ -245,7 +279,8 @@ struct SettingsView: View {
         label: String,
         placeholder: String,
         value: Binding<String>,
-        isVisible: Binding<Bool>
+        isVisible: Binding<Bool>,
+        field: SettingsField
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -259,6 +294,8 @@ struct SettingsView: View {
                     Image(systemName: isVisible.wrappedValue ? "eye.slash" : "eye")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
+                        .padding(4)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -273,15 +310,21 @@ struct SettingsView: View {
             .textFieldStyle(.plain)
             .font(.system(size: 12, design: .monospaced))
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(Color(nsColor: .windowBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                        focusedField == field
+                            ? Self.accentIndigo.opacity(0.5)
+                            : Color(nsColor: .separatorColor).opacity(0.2),
+                        lineWidth: focusedField == field ? 1.0 : 0.5
+                    )
             )
+            .focused($focusedField, equals: field)
         }
     }
 }

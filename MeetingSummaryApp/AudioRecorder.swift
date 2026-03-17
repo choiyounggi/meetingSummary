@@ -804,10 +804,9 @@ class AudioRecorder: NSObject, ObservableObject, AVAudioPlayerDelegate {
                         case .success(let pageURL):
                             self.processingStage = .completed
                             self.notionPageURL = pageURL
-                            // TODO: 테스트 완료 후 슬랙 알림 및 깃 푸시 재활성화
-                            // let title = self.buildNotionTitle(from: summary)
-                            // self.sendSlackNotification(title: title, notionURL: pageURL)
-                            // self.pushSummaryToGitHub(summary: summary, title: title)
+                            let title = self.buildNotionTitle(from: summary)
+                            self.sendSlackNotification(title: title, notionURL: pageURL)
+                            self.pushSummaryToGitHub(summary: summary, title: title)
                         case .failure(let error):
                             self.processingStage = .idle
                             self.errorMessage = "Notion 등록 실패: \(error.localizedDescription)"
