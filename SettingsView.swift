@@ -69,6 +69,33 @@ struct SettingsView: View {
                         field: .github
                     )
 
+                    Divider()
+
+                    // Notion Database ID
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Notion Database ID")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        TextField("173321af...", text: $settings.notionDatabaseId)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.black.opacity(0.03))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.2), lineWidth: 0.5)
+                            )
+
+                        Text("회의록이 저장될 Notion 데이터베이스 ID")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+
                     // 저장 버튼
                     HStack {
                         Spacer()

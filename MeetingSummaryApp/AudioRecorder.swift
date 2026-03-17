@@ -1868,7 +1868,7 @@ if __name__ == "__main__":
         }
 
         let notionKey = SettingsManager.shared.notionKey
-        let databaseId = "173321af000280d787eae2ffeb63c974"
+        let databaseId = SettingsManager.shared.notionDatabaseId
 
         let title = buildNotionTitle(from: summary)
         let children = buildNotionChildren(summary: summary, transcript: transcript)

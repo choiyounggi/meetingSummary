@@ -40,6 +40,7 @@ final class SettingsManager: ObservableObject {
     private let huggingFaceTokenKey = "HUGGINGFACE_TOKEN"
     private let pythonPathKey = "PYTHON_PATH"
     private let wikiRagURLKey = "WIKI_RAG_URL"
+    private let notionDatabaseIdKey = "NOTION_DATABASE_ID"
 
     @Published var openAIKey: String = "" {
         didSet {
@@ -86,6 +87,11 @@ final class SettingsManager: ObservableObject {
             UserDefaults.standard.set(wikiRagURL, forKey: wikiRagURLKey)
         }
     }
+    @Published var notionDatabaseId: String = "173321af000280d787eae2ffeb63c974" {
+        didSet {
+            UserDefaults.standard.set(notionDatabaseId, forKey: notionDatabaseIdKey)
+        }
+    }
 
     private init() {
         objectWillChange = ObservableObjectPublisher()
@@ -118,6 +124,8 @@ final class SettingsManager: ObservableObject {
 
         let savedWikiRagURL = UserDefaults.standard.string(forKey: wikiRagURLKey)
         wikiRagURL = savedWikiRagURL?.isEmpty == false ? savedWikiRagURL! : "http://localhost:8686"
+        let savedNotionDbId = UserDefaults.standard.string(forKey: notionDatabaseIdKey)
+        notionDatabaseId = savedNotionDbId?.isEmpty == false ? savedNotionDbId! : "173321af000280d787eae2ffeb63c974"
     }
     
     func masked(_ text: String) -> String {
