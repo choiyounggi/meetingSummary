@@ -2231,7 +2231,8 @@ if __name__ == "__main__":
     // MARK: - Slack 웹훅 알림
 
     private func sendSlackNotification(title: String, notionURL: String) {
-        guard let url = URL(string: "REDACTED_SLACK_WEBHOOK") else { return }
+        let webhookURL = SettingsManager.shared.slackWebhookURL
+        guard !webhookURL.isEmpty, let url = URL(string: webhookURL) else { return }
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
@@ -2266,9 +2267,17 @@ if __name__ == "__main__":
 
     // MARK: - GitHub 위키 레포에 회의록 푸시
 
-    private let wikiRepoOwner = "dev-rsquare"
-    private let wikiRepoName = "rtb-wiki"
-    private let wikiMeetingsPath = "rtb-unified/meetings"
+    private var wikiRepoOwner: String {
+        let repo = SettingsManager.shared.githubWikiRepo
+        return repo.components(separatedBy: "/").first ?? "dev-rsquare"
+    }
+    private var wikiRepoName: String {
+        let repo = SettingsManager.shared.githubWikiRepo
+        return repo.components(separatedBy: "/").last ?? "rtb-wiki"
+    }
+    private var wikiMeetingsPath: String {
+        return SettingsManager.shared.githubWikiPath
+    }
 
     private func pushSummaryToGitHub(summary: String, title: String) {
         let githubToken = SettingsManager.shared.githubToken

@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var isAPIExpanded: Bool = true
     @State private var isWikiExpanded: Bool = true
     @State private var isDiarizationExpanded: Bool = true
+    @State private var isIntegrationExpanded: Bool = true
     @FocusState private var focusedField: SettingsField?
 
     // MARK: - 디자인 토큰
@@ -20,6 +21,7 @@ struct SettingsView: View {
     private enum SettingsField: Hashable {
         case openAI, anthropic, notion, github, huggingFace
         case pythonPath, wikiPath, wikiRagURL
+        case slackWebhook, githubWikiRepo, githubWikiPath
     }
 
     var body: some View {
@@ -294,6 +296,131 @@ struct SettingsView: View {
                             .focused($focusedField, equals: .wikiRagURL)
 
                         Text("시맨틱 검색 기반 위키 컨텍스트 서버 URL")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+
+            // 연동 설정 카드
+            CardSection(
+                title: "연동 설정",
+                icon: "link",
+                isExpanded: $isIntegrationExpanded
+            ) {
+                VStack(spacing: 14) {
+                    // Slack Webhook URL
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Slack Webhook URL")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        TextField("https://hooks.slack.com/services/...", text: $settings.slackWebhookURL)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.black.opacity(0.03))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(
+                                        focusedField == .slackWebhook
+                                            ? Self.accentIndigo.opacity(0.5)
+                                            : Color(nsColor: .separatorColor).opacity(0.2),
+                                        lineWidth: focusedField == .slackWebhook ? 1.0 : 0.5
+                                    )
+                            )
+                            .shadow(
+                                color: focusedField == .slackWebhook
+                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
+                                    : Color.clear,
+                                radius: 3, x: 0, y: 0
+                            )
+                            .focused($focusedField, equals: .slackWebhook)
+
+                        Text("회의록 요약 완료 시 알림을 보낼 Slack 채널 웹훅")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Divider()
+
+                    // GitHub Wiki 레포
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("GitHub Wiki 레포")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        TextField("dev-rsquare/rtb-wiki", text: $settings.githubWikiRepo)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.black.opacity(0.03))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(
+                                        focusedField == .githubWikiRepo
+                                            ? Self.accentIndigo.opacity(0.5)
+                                            : Color(nsColor: .separatorColor).opacity(0.2),
+                                        lineWidth: focusedField == .githubWikiRepo ? 1.0 : 0.5
+                                    )
+                            )
+                            .shadow(
+                                color: focusedField == .githubWikiRepo
+                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
+                                    : Color.clear,
+                                radius: 3, x: 0, y: 0
+                            )
+                            .focused($focusedField, equals: .githubWikiRepo)
+
+                        Text("회의록이 커밋될 GitHub 레포 (owner/repo)")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Divider()
+
+                    // GitHub Wiki 경로
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("회의록 저장 경로")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        TextField("rtb-unified/meetings", text: $settings.githubWikiPath)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.black.opacity(0.03))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(
+                                        focusedField == .githubWikiPath
+                                            ? Self.accentIndigo.opacity(0.5)
+                                            : Color(nsColor: .separatorColor).opacity(0.2),
+                                        lineWidth: focusedField == .githubWikiPath ? 1.0 : 0.5
+                                    )
+                            )
+                            .shadow(
+                                color: focusedField == .githubWikiPath
+                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
+                                    : Color.clear,
+                                radius: 3, x: 0, y: 0
+                            )
+                            .focused($focusedField, equals: .githubWikiPath)
+
+                        Text("위키 레포 내 회의록 저장 디렉토리 경로")
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                     }

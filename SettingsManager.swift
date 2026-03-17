@@ -41,6 +41,9 @@ final class SettingsManager: ObservableObject {
     private let pythonPathKey = "PYTHON_PATH"
     private let wikiRagURLKey = "WIKI_RAG_URL"
     private let notionDatabaseIdKey = "NOTION_DATABASE_ID"
+    private let slackWebhookURLKey = "SLACK_WEBHOOK_URL"
+    private let githubWikiRepoKey = "GITHUB_WIKI_REPO"
+    private let githubWikiPathKey = "GITHUB_WIKI_PATH"
 
     @Published var openAIKey: String = "" {
         didSet {
@@ -92,6 +95,21 @@ final class SettingsManager: ObservableObject {
             UserDefaults.standard.set(notionDatabaseId, forKey: notionDatabaseIdKey)
         }
     }
+    @Published var slackWebhookURL: String = "REDACTED_SLACK_WEBHOOK" {
+        didSet {
+            UserDefaults.standard.set(slackWebhookURL, forKey: slackWebhookURLKey)
+        }
+    }
+    @Published var githubWikiRepo: String = "dev-rsquare/rtb-wiki" {
+        didSet {
+            UserDefaults.standard.set(githubWikiRepo, forKey: githubWikiRepoKey)
+        }
+    }
+    @Published var githubWikiPath: String = "rtb-unified/meetings" {
+        didSet {
+            UserDefaults.standard.set(githubWikiPath, forKey: githubWikiPathKey)
+        }
+    }
 
     private init() {
         objectWillChange = ObservableObjectPublisher()
@@ -126,6 +144,12 @@ final class SettingsManager: ObservableObject {
         wikiRagURL = savedWikiRagURL?.isEmpty == false ? savedWikiRagURL! : "http://localhost:8686"
         let savedNotionDbId = UserDefaults.standard.string(forKey: notionDatabaseIdKey)
         notionDatabaseId = savedNotionDbId?.isEmpty == false ? savedNotionDbId! : "173321af000280d787eae2ffeb63c974"
+        let savedSlackWebhook = UserDefaults.standard.string(forKey: slackWebhookURLKey)
+        slackWebhookURL = savedSlackWebhook?.isEmpty == false ? savedSlackWebhook! : "REDACTED_SLACK_WEBHOOK"
+        let savedGithubWikiRepo = UserDefaults.standard.string(forKey: githubWikiRepoKey)
+        githubWikiRepo = savedGithubWikiRepo?.isEmpty == false ? savedGithubWikiRepo! : "dev-rsquare/rtb-wiki"
+        let savedGithubWikiPath = UserDefaults.standard.string(forKey: githubWikiPathKey)
+        githubWikiPath = savedGithubWikiPath?.isEmpty == false ? savedGithubWikiPath! : "rtb-unified/meetings"
     }
     
     func masked(_ text: String) -> String {
