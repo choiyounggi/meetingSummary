@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var isAPIExpanded: Bool = true
     @State private var isWikiExpanded: Bool = true
     @State private var isDiarizationExpanded: Bool = true
+    @State private var selectedDiarizationMode: DiarizationMode = .off
     @State private var isIntegrationExpanded: Bool = true
     @FocusState private var focusedField: SettingsField?
 
@@ -138,19 +139,25 @@ struct SettingsView: View {
                 isExpanded: $isDiarizationExpanded
             ) {
                 VStack(spacing: 12) {
-                    Picker("", selection: $settings.diarizationMode) {
+                    Picker("", selection: $selectedDiarizationMode) {
                         ForEach(DiarizationMode.allCases, id: \.self) { mode in
                             Text(mode.label).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
+                    .onAppear { selectedDiarizationMode = settings.diarizationMode }
+                    .onChange(of: selectedDiarizationMode) { newValue in
+                        DispatchQueue.main.async {
+                            settings.diarizationMode = newValue
+                        }
+                    }
 
-                    Text(settings.diarizationMode.description)
+                    Text(selectedDiarizationMode.description)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if settings.diarizationMode == .pyannote {
+                    if selectedDiarizationMode == .pyannote {
                         Divider()
 
                         apiKeyRow(

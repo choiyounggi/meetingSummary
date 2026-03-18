@@ -27,8 +27,6 @@ enum DiarizationMode: Int, CaseIterable {
 }
 
 final class SettingsManager: ObservableObject {
-    var objectWillChange: ObservableObjectPublisher
-
     static let shared = SettingsManager()
     private let openAIKeyKey = "OPEN_AI_KEY"
     private let anthropicKeyKey = "ANTHROPIC_KEY"
@@ -112,8 +110,7 @@ final class SettingsManager: ObservableObject {
     }
 
     private init() {
-        objectWillChange = ObservableObjectPublisher()
-        
+
         // 1) UserDefaults에 저장된 값이 있으면 우선 사용
         let savedOpenAI = UserDefaults.standard.string(forKey: openAIKeyKey)
         let savedAnthropic = UserDefaults.standard.string(forKey: anthropicKeyKey)
