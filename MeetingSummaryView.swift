@@ -10,13 +10,13 @@ import UniformTypeIdentifiers
 
 // MARK: - 디자인 토큰
 private enum DesignToken {
-    static let accentIndigo = Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 1.0))
-    static let successGreen = Color(nsColor: NSColor(red: 0.16, green: 0.72, blue: 0.53, alpha: 1.0))
-    static let errorRed = Color(nsColor: NSColor(red: 0.91, green: 0.30, blue: 0.24, alpha: 1.0))
+    static let accent = Color.primary
+    static let successGreen = Color(nsColor: NSColor(red: 0.18, green: 0.68, blue: 0.47, alpha: 1.0))
+    static let errorRed = Color(nsColor: NSColor(red: 0.88, green: 0.28, blue: 0.28, alpha: 1.0))
 
-    static let cardCornerRadius: CGFloat = 12
-    static let cardPadding: CGFloat = 16
-    static let sectionSpacing: CGFloat = 12
+    static let cardCornerRadius: CGFloat = 10
+    static let cardPadding: CGFloat = 14
+    static let sectionSpacing: CGFloat = 10
 }
 
 // MARK: - 카드 섹션 컴포넌트
@@ -30,47 +30,36 @@ struct CardSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             // 섹션 헤더
             HStack {
-                HStack(spacing: 8) {
-                    // 인디고 배경 원 안에 흰색 아이콘
-                    ZStack {
-                        Circle()
-                            .fill(DesignToken.accentIndigo)
-                            .frame(width: 20, height: 20)
-                        Image(systemName: icon)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
+                HStack(spacing: 7) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.primary)
                 }
 
                 Spacer()
 
                 if let binding = isExpanded {
                     Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withAnimation(.easeInOut(duration: 0.15)) {
                             binding.wrappedValue.toggle()
                         }
                     } label: {
                         Image(systemName: binding.wrappedValue ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .frame(width: 22, height: 22)
-                            .background(
-                                Circle()
-                                    .fill(Color(nsColor: .separatorColor).opacity(0.08))
-                            )
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary.opacity(0.6))
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
 
             if isExpanded?.wrappedValue != false {
                 Divider()
-                    .opacity(0.1)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 14)
 
                 content()
                     .padding(DesignToken.cardPadding)
@@ -78,13 +67,12 @@ struct CardSection<Content: View>: View {
         }
         .background(
             RoundedRectangle(cornerRadius: DesignToken.cardCornerRadius)
-                .fill(.ultraThinMaterial)
+                .fill(Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: DesignToken.cardCornerRadius)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.1), lineWidth: 0.5)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.2), lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
     }
 }
 
@@ -97,19 +85,19 @@ struct StatusBadge: View {
         HStack(spacing: 5) {
             Circle()
                 .fill(color)
-                .frame(width: 7, height: 7)
+                .frame(width: 6, height: 6)
             Text(text)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(color)
+                .foregroundColor(.primary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .background(
             Capsule()
-                .fill(.ultraThinMaterial)
+                .fill(Color(nsColor: .controlBackgroundColor))
                 .overlay(
                     Capsule()
-                        .fill(color.opacity(0.08))
+                        .strokeBorder(Color(nsColor: .separatorColor).opacity(0.2), lineWidth: 0.5)
                 )
         )
     }
@@ -132,24 +120,24 @@ struct MeetingSummaryView: View {
                     if recorder.isRecording {
                         StatusBadge(text: "녹음 중", color: .red)
                     } else if recorder.isUploading {
-                        HStack(spacing: 12) {
-                            StatusBadge(text: "처리 중...", color: DesignToken.accentIndigo)
+                        HStack(spacing: 10) {
+                            StatusBadge(text: "처리 중...", color: DesignToken.successGreen)
 
                             Button {
                                 recorder.cancelProcessing()
                             } label: {
                                 HStack(spacing: 4) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 12))
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 10, weight: .medium))
                                     Text("취소")
                                         .font(.system(size: 12, weight: .medium))
                                 }
-                                .foregroundColor(.white)
+                                .foregroundColor(DesignToken.errorRed)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
                                 .background(
                                     Capsule()
-                                        .fill(DesignToken.errorRed)
+                                        .strokeBorder(DesignToken.errorRed.opacity(0.3), lineWidth: 0.5)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -164,14 +152,13 @@ struct MeetingSummaryView: View {
             if let error = recorder.errorMessage {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
+                        Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 11))
                         Text(error)
                             .font(.system(size: 11))
                     }
                     .foregroundColor(DesignToken.errorRed)
 
-                    // 마이크 권한 에러일 때 설정 열기 버튼 표시
                     if error.contains("마이크 권한") {
                         Button {
                             recorder.openMicPrivacySettings()
@@ -186,7 +173,7 @@ struct MeetingSummaryView: View {
                             .padding(.vertical, 6)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(DesignToken.accentIndigo)
+                        .tint(Color(nsColor: .controlAccentColor))
                     }
                 }
                 .padding(.horizontal, 12)
@@ -194,11 +181,11 @@ struct MeetingSummaryView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(DesignToken.errorRed.opacity(0.04))
-                        )
+                        .fill(DesignToken.errorRed.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(DesignToken.errorRed.opacity(0.15), lineWidth: 0.5)
                 )
                 .padding(.horizontal, 16)
             }
@@ -214,15 +201,12 @@ struct MeetingSummaryView: View {
                     ZStack {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(isDroppingFile
-                                  ? DesignToken.accentIndigo.opacity(0.04)
-                                  : Color.clear)
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(.ultraThinMaterial)
-                            .opacity(isDroppingFile ? 0 : 1)
+                                  ? Color(nsColor: .controlAccentColor).opacity(0.05)
+                                  : Color(nsColor: .textBackgroundColor).opacity(0.5))
                         RoundedRectangle(cornerRadius: 8)
                             .strokeBorder(
                                 isDroppingFile
-                                ? DesignToken.accentIndigo.opacity(0.5)
+                                ? Color(nsColor: .controlAccentColor).opacity(0.4)
                                 : Color(nsColor: .separatorColor).opacity(0.2),
                                 style: StrokeStyle(lineWidth: 1, dash: isDroppingFile ? [] : [5, 3])
                             )
@@ -238,7 +222,7 @@ struct MeetingSummaryView: View {
                                 Text("음성 파일을 여기에 드래그")
                                     .font(.system(size: 11))
                             }
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.secondary.opacity(0.6))
                         }
                         .padding(.vertical, 8)
                     }
@@ -248,7 +232,7 @@ struct MeetingSummaryView: View {
                     }
 
                     // 녹음 버튼
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         Button {
                             recorder.startRecording()
                         } label: {
@@ -258,12 +242,16 @@ struct MeetingSummaryView: View {
                                 Text("녹음 시작")
                                     .font(.system(size: 13, weight: .medium))
                             }
+                            .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(nsColor: .labelColor).opacity(
+                                        recorder.isRecording || recorder.isUploading ? 0.3 : 0.85))
+                            )
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(DesignToken.accentIndigo)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .buttonStyle(.plain)
                         .disabled(recorder.isRecording || recorder.isUploading)
 
                         Button {
@@ -275,11 +263,15 @@ struct MeetingSummaryView: View {
                                 Text("녹음 종료")
                                     .font(.system(size: 13, weight: .medium))
                             }
+                            .foregroundColor(recorder.isRecording ? .primary : .secondary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 0.5)
+                            )
                         }
-                        .buttonStyle(.bordered)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .buttonStyle(.plain)
                         .disabled(!recorder.isRecording)
                     }
                 }
@@ -302,14 +294,10 @@ struct MeetingSummaryView: View {
                             }
                         } label: {
                             Image(systemName: recorder.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 14))
+                                .font(.system(size: 13))
                                 .foregroundColor(.primary)
-                                .frame(width: 32, height: 32)
+                                .frame(width: 30, height: 30)
                                 .background(
-                                    Circle()
-                                        .fill(.ultraThinMaterial)
-                                )
-                                .overlay(
                                     Circle()
                                         .strokeBorder(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 0.5)
                                 )
@@ -325,7 +313,7 @@ struct MeetingSummaryView: View {
                                 in: 0...max(recorder.playbackDuration, 0.1)
                             )
                             .controlSize(.small)
-                            .tint(DesignToken.accentIndigo)
+                            .tint(Color(nsColor: .labelColor).opacity(0.6))
 
                             HStack {
                                 Text(formatTime(recorder.playbackCurrentTime))
@@ -333,18 +321,17 @@ struct MeetingSummaryView: View {
                                 Text(formatTime(recorder.playbackDuration))
                             }
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.secondary.opacity(0.6))
                         }
                     }
                 } else {
                     HStack(spacing: 6) {
                         Image(systemName: "speaker.slash")
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
                         Text("녹음 완료 후 재생할 수 있습니다")
                             .font(.system(size: 12))
-                            .foregroundColor(.secondary)
                     }
+                    .foregroundColor(.secondary.opacity(0.6))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 4)
                 }
@@ -368,14 +355,14 @@ struct MeetingSummaryView: View {
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.secondary.opacity(0.6))
                         }
-                        .foregroundColor(DesignToken.accentIndigo)
+                        .foregroundColor(.primary)
                         .padding(.vertical, 6)
                         .padding(.horizontal, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 6)
-                                .fill(DesignToken.accentIndigo.opacity(0.04))
+                                .fill(Color(nsColor: .controlBackgroundColor))
                         )
                     }
                 } else if recorder.isUploading {
@@ -383,9 +370,9 @@ struct MeetingSummaryView: View {
                         // 프로그레스바
                         ProgressView(value: recorder.processingStage.progress)
                             .progressViewStyle(.linear)
-                            .tint(DesignToken.accentIndigo)
+                            .tint(DesignToken.successGreen)
 
-                        // 단계 표시 (5단계: 검증 → STT → 화자분리 → 요약 → 등록)
+                        // 단계 표시
                         HStack(spacing: 0) {
                             ForEach([ProcessingStage.validating, .transcribing, .diarizing, .summarizing, .uploading], id: \.rawValue) { stage in
                                 VStack(spacing: 4) {
@@ -394,13 +381,13 @@ struct MeetingSummaryView: View {
                                             recorder.processingStage.rawValue >= stage.rawValue
                                             ? (recorder.processingStage.rawValue > stage.rawValue
                                                ? DesignToken.successGreen
-                                               : DesignToken.accentIndigo)
-                                            : Color.gray.opacity(0.3)
+                                               : Color(nsColor: .labelColor))
+                                            : Color(nsColor: .separatorColor).opacity(0.3)
                                         )
-                                        .frame(width: 8, height: 8)
+                                        .frame(width: 7, height: 7)
                                     Text(stageLabel(stage))
                                         .font(.system(size: 10))
-                                        .foregroundColor(recorder.processingStage.rawValue >= stage.rawValue ? .primary : .secondary)
+                                        .foregroundColor(recorder.processingStage.rawValue >= stage.rawValue ? .primary : .secondary.opacity(0.6))
                                 }
                                 .frame(maxWidth: .infinity)
                             }
@@ -422,8 +409,8 @@ struct MeetingSummaryView: View {
                                 recorder.cancelProcessing()
                             } label: {
                                 HStack(spacing: 4) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 11))
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 10, weight: .medium))
                                     Text("취소")
                                         .font(.system(size: 12, weight: .medium))
                                 }
@@ -453,11 +440,10 @@ struct MeetingSummaryView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "doc.badge.clock")
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
                         Text("완료되면 Notion 링크가 표시됩니다")
                             .font(.system(size: 12))
-                            .foregroundColor(.secondary)
                     }
+                    .foregroundColor(.secondary.opacity(0.6))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 4)
                 }

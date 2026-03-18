@@ -13,10 +13,7 @@ struct SettingsView: View {
     @State private var isIntegrationExpanded: Bool = true
     @FocusState private var focusedField: SettingsField?
 
-    // MARK: - 디자인 토큰
-
-    private static let accentIndigo = Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 1.0))
-    private static let successGreen = Color(nsColor: NSColor(red: 0.16, green: 0.72, blue: 0.53, alpha: 1.0))
+    private static let successGreen = Color(nsColor: NSColor(red: 0.18, green: 0.68, blue: 0.47, alpha: 1.0))
 
     private enum SettingsField: Hashable {
         case openAI, anthropic, notion, github, huggingFace
@@ -86,16 +83,21 @@ struct SettingsView: View {
                             .padding(.vertical, 8)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.black.opacity(0.03))
+                                    .fill(Color(nsColor: .textBackgroundColor))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.2), lineWidth: 0.5)
+                                    .strokeBorder(
+                                        focusedField == nil
+                                            ? Color(nsColor: .separatorColor).opacity(0.2)
+                                            : Color(nsColor: .separatorColor).opacity(0.4),
+                                        lineWidth: 0.5
+                                    )
                             )
 
                         Text("회의록이 저장될 Notion 데이터베이스 ID")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.secondary.opacity(0.6))
                     }
 
                     // 저장 버튼
@@ -114,11 +116,15 @@ struct SettingsView: View {
                                 Text("저장")
                                     .font(.system(size: 13, weight: .medium))
                             }
+                            .foregroundColor(.white)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(nsColor: .labelColor).opacity(0.85))
+                            )
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Self.accentIndigo)
+                        .buttonStyle(.plain)
                     }
                     .padding(.top, 4)
                 }
@@ -132,7 +138,6 @@ struct SettingsView: View {
                 isExpanded: $isDiarizationExpanded
             ) {
                 VStack(spacing: 12) {
-                    // 모드 선택
                     Picker("", selection: $settings.diarizationMode) {
                         ForEach(DiarizationMode.allCases, id: \.self) { mode in
                             Text(mode.label).tag(mode)
@@ -140,13 +145,11 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    // 모드 설명
                     Text(settings.diarizationMode.description)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // pyannote 모드일 때만 추가 설정 노출
                     if settings.diarizationMode == .pyannote {
                         Divider()
 
@@ -172,28 +175,22 @@ struct SettingsView: View {
                                 .padding(.vertical, 8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.black.opacity(0.03))
+                                        .fill(Color(nsColor: .textBackgroundColor))
                                 )
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
                                         .strokeBorder(
                                             focusedField == .pythonPath
-                                                ? Self.accentIndigo.opacity(0.5)
+                                                ? Color(nsColor: .separatorColor).opacity(0.5)
                                                 : Color(nsColor: .separatorColor).opacity(0.2),
-                                            lineWidth: focusedField == .pythonPath ? 1.0 : 0.5
+                                            lineWidth: 0.5
                                         )
-                                )
-                                .shadow(
-                                    color: focusedField == .pythonPath
-                                        ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
-                                        : Color.clear,
-                                    radius: 3, x: 0, y: 0
                                 )
                                 .focused($focusedField, equals: .pythonPath)
 
                             Text("pyannote + torch가 설치된 Python 경로")
                                 .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.secondary.opacity(0.6))
                         }
                     }
                 }
@@ -220,22 +217,16 @@ struct SettingsView: View {
                             .padding(.vertical, 8)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.black.opacity(0.03))
+                                    .fill(Color(nsColor: .textBackgroundColor))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
                                     .strokeBorder(
                                         focusedField == .wikiPath
-                                            ? Self.accentIndigo.opacity(0.5)
+                                            ? Color(nsColor: .separatorColor).opacity(0.5)
                                             : Color(nsColor: .separatorColor).opacity(0.2),
-                                        lineWidth: focusedField == .wikiPath ? 1.0 : 0.5
+                                        lineWidth: 0.5
                                     )
-                            )
-                            .shadow(
-                                color: focusedField == .wikiPath
-                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
-                                    : Color.clear,
-                                radius: 3, x: 0, y: 0
                             )
                             .focused($focusedField, equals: .wikiPath)
 
@@ -244,6 +235,7 @@ struct SettingsView: View {
                         } label: {
                             Image(systemName: "folder")
                                 .font(.system(size: 13))
+                                .foregroundColor(.secondary)
                         }
                         .buttonStyle(.bordered)
                     }
@@ -276,28 +268,22 @@ struct SettingsView: View {
                             .padding(.vertical, 8)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.black.opacity(0.03))
+                                    .fill(Color(nsColor: .textBackgroundColor))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
                                     .strokeBorder(
                                         focusedField == .wikiRagURL
-                                            ? Self.accentIndigo.opacity(0.5)
+                                            ? Color(nsColor: .separatorColor).opacity(0.5)
                                             : Color(nsColor: .separatorColor).opacity(0.2),
-                                        lineWidth: focusedField == .wikiRagURL ? 1.0 : 0.5
+                                        lineWidth: 0.5
                                     )
-                            )
-                            .shadow(
-                                color: focusedField == .wikiRagURL
-                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
-                                    : Color.clear,
-                                radius: 3, x: 0, y: 0
                             )
                             .focused($focusedField, equals: .wikiRagURL)
 
                         Text("시맨틱 검색 기반 위키 컨텍스트 서버 URL")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.secondary.opacity(0.6))
                     }
                 }
             }
@@ -310,120 +296,33 @@ struct SettingsView: View {
                 isExpanded: $isIntegrationExpanded
             ) {
                 VStack(spacing: 14) {
-                    // Slack Webhook URL
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Slack Webhook URL")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
-
-                        TextField("https://hooks.slack.com/services/...", text: $settings.slackWebhookURL)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.black.opacity(0.03))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .strokeBorder(
-                                        focusedField == .slackWebhook
-                                            ? Self.accentIndigo.opacity(0.5)
-                                            : Color(nsColor: .separatorColor).opacity(0.2),
-                                        lineWidth: focusedField == .slackWebhook ? 1.0 : 0.5
-                                    )
-                            )
-                            .shadow(
-                                color: focusedField == .slackWebhook
-                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
-                                    : Color.clear,
-                                radius: 3, x: 0, y: 0
-                            )
-                            .focused($focusedField, equals: .slackWebhook)
-
-                        Text("회의록 요약 완료 시 알림을 보낼 Slack 채널 웹훅")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
+                    settingsTextField(
+                        label: "Slack Webhook URL",
+                        placeholder: "https://hooks.slack.com/services/...",
+                        value: $settings.slackWebhookURL,
+                        field: .slackWebhook,
+                        hint: "회의록 요약 완료 시 알림을 보낼 Slack 채널 웹훅"
+                    )
 
                     Divider()
 
-                    // GitHub Wiki 레포
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("GitHub Wiki 레포")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
-
-                        TextField("dev-rsquare/rtb-wiki", text: $settings.githubWikiRepo)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.black.opacity(0.03))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .strokeBorder(
-                                        focusedField == .githubWikiRepo
-                                            ? Self.accentIndigo.opacity(0.5)
-                                            : Color(nsColor: .separatorColor).opacity(0.2),
-                                        lineWidth: focusedField == .githubWikiRepo ? 1.0 : 0.5
-                                    )
-                            )
-                            .shadow(
-                                color: focusedField == .githubWikiRepo
-                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
-                                    : Color.clear,
-                                radius: 3, x: 0, y: 0
-                            )
-                            .focused($focusedField, equals: .githubWikiRepo)
-
-                        Text("회의록이 커밋될 GitHub 레포 (owner/repo)")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
+                    settingsTextField(
+                        label: "GitHub Wiki 레포",
+                        placeholder: "dev-rsquare/rtb-wiki",
+                        value: $settings.githubWikiRepo,
+                        field: .githubWikiRepo,
+                        hint: "회의록이 커밋될 GitHub 레포 (owner/repo)"
+                    )
 
                     Divider()
 
-                    // GitHub Wiki 경로
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("회의록 저장 경로")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
-
-                        TextField("rtb-unified/meetings", text: $settings.githubWikiPath)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.black.opacity(0.03))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .strokeBorder(
-                                        focusedField == .githubWikiPath
-                                            ? Self.accentIndigo.opacity(0.5)
-                                            : Color(nsColor: .separatorColor).opacity(0.2),
-                                        lineWidth: focusedField == .githubWikiPath ? 1.0 : 0.5
-                                    )
-                            )
-                            .shadow(
-                                color: focusedField == .githubWikiPath
-                                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
-                                    : Color.clear,
-                                radius: 3, x: 0, y: 0
-                            )
-                            .focused($focusedField, equals: .githubWikiPath)
-
-                        Text("위키 레포 내 회의록 저장 디렉토리 경로")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
+                    settingsTextField(
+                        label: "회의록 저장 경로",
+                        placeholder: "rtb-unified/meetings",
+                        value: $settings.githubWikiPath,
+                        field: .githubWikiPath,
+                        hint: "위키 레포 내 회의록 저장 디렉토리 경로"
+                    )
                 }
             }
             .padding(.horizontal, 16)
@@ -447,6 +346,45 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
+    private func settingsTextField(
+        label: String,
+        placeholder: String,
+        value: Binding<String>,
+        field: SettingsField,
+        hint: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.secondary)
+
+            TextField(placeholder, text: value)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(
+                            focusedField == field
+                                ? Color(nsColor: .separatorColor).opacity(0.5)
+                                : Color(nsColor: .separatorColor).opacity(0.2),
+                            lineWidth: 0.5
+                        )
+                )
+                .focused($focusedField, equals: field)
+
+            Text(hint)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary.opacity(0.6))
+        }
+    }
+
+    @ViewBuilder
     private func apiKeyRow(
         label: String,
         placeholder: String,
@@ -465,7 +403,7 @@ struct SettingsView: View {
                 } label: {
                     Image(systemName: isVisible.wrappedValue ? "eye.slash" : "eye")
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.secondary.opacity(0.6))
                         .padding(4)
                         .contentShape(Rectangle())
                 }
@@ -485,22 +423,16 @@ struct SettingsView: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.black.opacity(0.03))
+                    .fill(Color(nsColor: .textBackgroundColor))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(
                         focusedField == field
-                            ? Self.accentIndigo.opacity(0.5)
+                            ? Color(nsColor: .separatorColor).opacity(0.5)
                             : Color(nsColor: .separatorColor).opacity(0.2),
-                        lineWidth: focusedField == field ? 1.0 : 0.5
+                        lineWidth: 0.5
                     )
-            )
-            .shadow(
-                color: focusedField == field
-                    ? Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.3))
-                    : Color.clear,
-                radius: 3, x: 0, y: 0
             )
             .focused($focusedField, equals: field)
         }

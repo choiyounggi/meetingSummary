@@ -28,17 +28,14 @@ struct WaveformView: View {
         }
     }
 
-    // MARK: - 인디고 테마 바 컬러
+    // MARK: - 뉴트럴 바 컬러
     private func barColor(for level: CGFloat) -> Color {
         if level > 0.6 {
-            // 높은 레벨: 따뜻한 코랄/레드
-            return Color(nsColor: NSColor(red: 0.95, green: 0.35, blue: 0.35, alpha: 0.9))
+            return Color(nsColor: NSColor(red: 0.85, green: 0.30, blue: 0.25, alpha: 0.95))
         } else if level > 0.3 {
-            // 중간 레벨: 인디고 액센트
-            return Color(nsColor: NSColor(red: 0.31, green: 0.27, blue: 0.90, alpha: 0.7))
+            return Color(nsColor: NSColor(red: 0.25, green: 0.25, blue: 0.28, alpha: 0.85))
         } else {
-            // 낮은 레벨: 뉴트럴
-            return Color(nsColor: NSColor(red: 0.45, green: 0.45, blue: 0.52, alpha: 0.4))
+            return Color(nsColor: NSColor(red: 0.40, green: 0.40, blue: 0.43, alpha: 0.60))
         }
     }
 }
